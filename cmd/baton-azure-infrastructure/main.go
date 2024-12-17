@@ -8,7 +8,6 @@ import (
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector"
 	"github.com/conductorone/baton-sdk/pkg/config"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
-	"github.com/conductorone/baton-sdk/pkg/field"
 	"github.com/conductorone/baton-sdk/pkg/types"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"github.com/spf13/viper"
@@ -19,22 +18,14 @@ var version = "dev"
 
 func main() {
 	ctx := context.Background()
-
-	_, cmd, err := config.DefineConfiguration(
-		ctx,
-		"baton-azure-infrastructure",
-		getConnector,
-		field.Configuration{
-			Fields: ConfigurationFields,
-		},
-	)
+	_, cmd, err := config.DefineConfiguration(ctx, "baton-azure-infrastructure", getConnector, cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 
 	cmd.Version = version
-
+	cmd.MarkFlagsMutuallyExclusive("use-cli-credentials", "azure-client-secret")
 	err = cmd.Execute()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
