@@ -177,6 +177,93 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 	return grants, pageToken, nil, nil
 }
 
+func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+	if principal.Id.ResourceType != userResourceType.Id {
+		l.Warn(
+			"baton-azure-infrastructure: only users can be granted group membership",
+			zap.String("principal_type", principal.Id.ResourceType),
+			zap.String("principal_id", principal.Id.Resource),
+		)
+
+		return nil, errors.New("baton-azure-infrastructure: only users can be granted group entitlements")
+	}
+
+	var reqURL string
+	groupID := entitlement.Resource.Id.Resource
+	switch {
+	case strings.HasSuffix(entitlement.Id, ":owners"):
+		// https://learn.microsoft.com/en-us/graph/api/group-post-owners?view=graph-rest-1.0&tabs=http
+		reqURL = g.cn.buildURL(path.Join("groups", groupID, "owners", "$ref"), url.Values{})
+	case strings.HasSuffix(entitlement.Id, ":members"):
+		// https://learn.microsoft.com/en-us/graph/api/group-post-members?view=graph-rest-1.0&tabs=http
+		reqURL = g.cn.buildURL(path.Join("groups", groupID, "members", "$ref"), url.Values{})
+	default:
+		return nil, errors.New("baton-azure-infrastructure: only can provision membership or owners entitlements to a group")
+	}
+
+	objRef := getGroupGrantURL(principal)
+	assign := &assignment{
+		ObjectRef: objRef,
+	}
+	body, err := assign.MarshalToReader()
+	if err != nil {
+		return nil, err
+	}
+
+	err = g.cn.query(ctx, graphReadScopes, http.MethodPost, reqURL, body, nil)
+	if err != nil {
+		if strings.Contains(err.Error(), "added object references already exist") {
+			l.Info("Attempted to grant a group membership that already exists, treating as successful")
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	return nil, nil
+}
+
+func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+	entitlement := grant.Entitlement
+	principal := grant.Principal
+	if principal.Id.ResourceType != userResourceType.Id {
+		l.Warn(
+			"baton-azure-infrastructure: only users can be granted group membership",
+			zap.String("principal_type", principal.Id.ResourceType),
+			zap.String("principal_id", principal.Id.Resource),
+		)
+		return nil, errors.New("baton-azure-infrastructure: only users can be granted group entitlements")
+	}
+
+	var reqURL string
+	groupID := entitlement.Resource.Id.Resource
+	userID := principal.Id.Resource
+	switch {
+	case strings.HasSuffix(entitlement.Id, ":owners"):
+		// https://learn.microsoft.com/en-us/graph/api/group-post-owners?view=graph-rest-1.0&tabs=http
+		reqURL = g.cn.buildURL(path.Join("groups", groupID, "owners", userID, "$ref"), url.Values{})
+	case strings.HasSuffix(entitlement.Id, ":members"):
+		// https://learn.microsoft.com/en-us/graph/api/group-delete-members?view=graph-rest-1.0&tabs=http
+		reqURL = g.cn.buildURL(path.Join("groups", groupID, "members", userID, "$ref"), url.Values{})
+	default:
+		return nil, errors.New("baton-azure-infrastructure: only can revoke membership or owners entitlements to a group")
+	}
+
+	err := g.cn.query(ctx, graphReadScopes, http.MethodDelete, reqURL, nil, nil)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			l.Info("Group membership to revoke not found; treating as successful because the end state is achieved")
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	return nil, nil
+}
+
 func newGroupBuilder(conn *Connector) *groupBuilder {
 	return &groupBuilder{cn: conn}
 }

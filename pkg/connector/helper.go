@@ -1,7 +1,9 @@
 package connector
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/mail"
 	"net/url"
@@ -348,4 +350,20 @@ func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Reso
 	})
 
 	return grants, err
+}
+
+func (a *assignment) MarshalToReader() (*bytes.Reader, error) {
+	data, err := json.Marshal(a)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(data), nil
+}
+
+func getGroupGrantURL(principal *v2.Resource) string {
+	return (&url.URL{
+		Scheme: "https",
+		Host:   "graph.microsoft.com",
+		Path:   path.Join("v1.0", "directoryObjects", principal.Id.Resource),
+	}).String()
 }

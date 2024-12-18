@@ -67,3 +67,7 @@ type membership struct {
 	AppOwnerOrganizationId string `json:"appOwnerOrganizationId"`
 	OnPremisesSyncEnabled  bool   `json:"onPremisesSyncEnabled"`
 }
+
+type assignment struct {
+	ObjectRef string `json:"@odata.id"`
+}
