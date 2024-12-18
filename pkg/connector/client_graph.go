@@ -68,6 +68,16 @@ func (c *Connector) buildURL(reqPath string, v url.Values) string {
 	return ux.String()
 }
 
+func (c *Connector) buildBetaURL(reqPath string, v url.Values) string {
+	ux := url.URL{
+		Scheme:   "https",
+		Host:     apiDomain,
+		Path:     path.Join(betaVersion, reqPath),
+		RawQuery: v.Encode(),
+	}
+	return ux.String()
+}
+
 func (c *Connector) query(ctx context.Context, scopes []string, method string, requestURL string, body io.Reader, res interface{}) error {
 	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 	if err != nil {

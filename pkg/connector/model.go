@@ -53,3 +53,17 @@ type groupsList struct {
 	NextLink string   `json:"@odata.nextLink"`
 	Groups   []*group `json:"value"`
 }
+
+type membershipList struct {
+	Context  string        `json:"@odata.context"`
+	NextLink string        `json:"@odata.nextLink"`
+	Members  []*membership `json:"value"`
+}
+
+type membership struct {
+	Id                     string `json:"id"`
+	Type                   string `json:"@odata.type"`
+	ServicePrincipalType   string `json:"servicePrincipalType"`
+	AppOwnerOrganizationId string `json:"appOwnerOrganizationId"`
+	OnPremisesSyncEnabled  bool   `json:"onPremisesSyncEnabled"`
+}

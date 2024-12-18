@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"net/mail"
 	"net/url"
 	"path"
@@ -160,11 +161,11 @@ func groupResource(ctx context.Context, g *group, parentResourceID *v2.ResourceI
 		"security_identifier": g.SecurityIdentifier,
 	}
 
-	if g.Mail != "" {
+	if !IsEmpty(g.Mail) {
 		profile["mail"] = g.Mail
 	}
 
-	if g.Classification != "" {
+	if !IsEmpty(g.Classification) {
 		profile["classification"] = g.Classification
 	}
 
@@ -177,7 +178,6 @@ func groupResource(ctx context.Context, g *group, parentResourceID *v2.ResourceI
 	}
 
 	groupTraitOptions := []rs.GroupTraitOption{rs.WithGroupProfile(profile)}
-
 	rv, err := rs.NewGroupResource(
 		g.DisplayName,
 		groupResourceType,
@@ -192,6 +192,10 @@ func groupResource(ctx context.Context, g *group, parentResourceID *v2.ResourceI
 	}
 
 	return rv, nil
+}
+
+func IsEmpty(field string) bool {
+	return field == ""
 }
 
 func groupURL(g *group) string {
@@ -251,4 +255,26 @@ func setGroupKeys() url.Values {
 	}, ","))
 	v.Set("$top", "999")
 	return v
+}
+
+func setMemberQuery() url.Values {
+	memberQuery := url.Values{}
+	memberQuery.Set("$select", strings.Join([]string{
+		"id",
+		"servicePrincipalType",
+		"onPremisesSyncEnabled",
+	}, ","))
+	memberQuery.Set("$top", "999")
+	return memberQuery
+}
+
+func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, permission string) string {
+	return fmt.Sprintf(
+		"%s-grant:%s:%s:%s:%s",
+		resourceID.ResourceType,
+		resourceID.Resource,
+		principalId.ResourceType,
+		principalId.Resource,
+		permission,
+	)
 }
