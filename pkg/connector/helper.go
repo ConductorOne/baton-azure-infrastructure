@@ -5,8 +5,9 @@ import (
 	"net/mail"
 	"net/url"
 	"path"
+	"strings"
 
-	"github.com/conductorone/baton-azure-infrastructure/client"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	pagination "github.com/conductorone/baton-sdk/pkg/pagination"
 	resource "github.com/conductorone/baton-sdk/pkg/types/resource"
@@ -119,4 +120,32 @@ func fetchEmailAddresses(email string, upn string) string {
 	}
 
 	return primaryEmail
+}
+
+func setUserKeys() url.Values {
+	v := url.Values{}
+	v.Set("$select", strings.Join([]string{
+		"id",
+		"displayName",
+		"mail",
+		"userPrincipalName",
+		"jobTitle",
+		"manager",
+		"accountEnabled",
+		"employeeType",
+		"employeeHireDate",
+		"employeeId",
+		"department",
+	}, ","))
+	v.Set("$expand", "manager($select=id,employeeId,mail,displayName)")
+	v.Set("$top", "999")
+	return v
+}
+
+func setUserResponseKeys() url.Values {
+	v := url.Values{}
+	v.Set("$select", strings.Join([]string{
+		"userPurpose",
+	}, ","))
+	return v
 }

@@ -22,11 +22,11 @@ func TestUserBuilderList(t *testing.T) {
 		t.Skip()
 	}
 
-	cli, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
 	u := &userBuilder{
-		c: &cli,
+		cn: &connTest,
 	}
 	res, _, _, err := u.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
