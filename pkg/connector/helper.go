@@ -7,10 +7,10 @@ import (
 	"path"
 	"strings"
 
-	"github.com/conductorone/baton-azure-infrastructure/pkg/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	pagination "github.com/conductorone/baton-sdk/pkg/pagination"
-	resource "github.com/conductorone/baton-sdk/pkg/types/resource"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	expSlices "golang.org/x/exp/slices"
 )
 
 const (
@@ -27,7 +27,7 @@ var graphReadScopes = []string{
 }
 
 // Create a new connector resource for an Entra User.
-func userResource(ctx context.Context, u *client.User, parentResourceID *v2.ResourceId, userTraitOptions ...resource.UserTraitOption) (*v2.Resource, error) {
+func userResource(ctx context.Context, u *user, parentResourceID *v2.ResourceId, userTraitOptions ...rs.UserTraitOption) (*v2.Resource, error) {
 	primaryEmail := fetchEmailAddresses(u.Email, u.UserPrincipalName)
 	profile := make(map[string]interface{})
 	profile["id"] = u.ID
@@ -48,29 +48,29 @@ func userResource(ctx context.Context, u *client.User, parentResourceID *v2.Reso
 		profile[supervisorFullNameProfileKey] = u.Manager.DisplayName
 	}
 
-	options := []resource.UserTraitOption{
-		resource.WithEmail(primaryEmail, true),
-		resource.WithUserProfile(profile),
+	options := []rs.UserTraitOption{
+		rs.WithEmail(primaryEmail, true),
+		rs.WithUserProfile(profile),
 	}
 
 	options = append(options, userTraitOptions...)
 	if u.UserPrincipalName != "" {
-		options = append(options, resource.WithUserLogin(u.UserPrincipalName))
+		options = append(options, rs.WithUserLogin(u.UserPrincipalName))
 	}
 
 	if u.AccountEnabled {
-		options = append(options, resource.WithStatus(v2.UserTrait_Status_STATUS_ENABLED))
+		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED))
 	} else {
-		options = append(options, resource.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
+		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
 	}
 
-	ret, err := resource.NewUserResource(
+	ret, err := rs.NewUserResource(
 		u.DisplayName,
 		userResourceType,
 		u.ID,
 		options,
-		resource.WithParentResourceID(parentResourceID),
-		resource.WithAnnotation(&v2.ExternalLink{
+		rs.WithParentResourceID(parentResourceID),
+		rs.WithAnnotation(&v2.ExternalLink{
 			Url: userURL(u),
 		}),
 	)
@@ -81,7 +81,7 @@ func userResource(ctx context.Context, u *client.User, parentResourceID *v2.Reso
 	return ret, nil
 }
 
-func userURL(u *client.User) string {
+func userURL(u *user) string {
 	return (&url.URL{
 		Scheme:   "https",
 		Host:     "entra.microsoft.com",
@@ -147,5 +147,108 @@ func setUserResponseKeys() url.Values {
 	v.Set("$select", strings.Join([]string{
 		"userPurpose",
 	}, ","))
+	return v
+}
+
+func groupResource(ctx context.Context, g *group, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+	profile := map[string]interface{}{
+		"object_id":           g.ID,
+		"group_type":          groupTypeValue(g),
+		"membership_type":     membershipTypeValue(g),
+		"mail_enabled":        g.MailEnabled,
+		"security_enabled":    g.SecurityEnabled,
+		"security_identifier": g.SecurityIdentifier,
+	}
+
+	if g.Mail != "" {
+		profile["mail"] = g.Mail
+	}
+
+	if g.Classification != "" {
+		profile["classification"] = g.Classification
+	}
+
+	if g.OnPremisesSecurityIdentifier != nil {
+		profile["on_premises_security_identifier"] = *g.OnPremisesSecurityIdentifier
+	}
+
+	if g.OnPremisesSyncEnabled {
+		profile["on_premises_sync_enabled"] = g.OnPremisesSyncEnabled
+	}
+
+	groupTraitOptions := []rs.GroupTraitOption{rs.WithGroupProfile(profile)}
+
+	rv, err := rs.NewGroupResource(
+		g.DisplayName,
+		groupResourceType,
+		g.ID,
+		groupTraitOptions,
+		rs.WithAnnotation(&v2.ExternalLink{
+			Url: groupURL(g),
+		}),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return rv, nil
+}
+
+func groupURL(g *group) string {
+	return (&url.URL{
+		Scheme:   "https",
+		Host:     "entra.microsoft.com",
+		Path:     "/",
+		Fragment: path.Join("view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Overview/groupId/", g.ID),
+	}).String()
+}
+
+func groupTypeValue(g *group) string {
+	if expSlices.Contains(g.GroupTypes, "Unified") {
+		return "microsoft_365"
+	}
+
+	if g.MailEnabled && g.SecurityEnabled {
+		return "mail_enabled_security"
+	}
+
+	if g.SecurityEnabled {
+		return "security"
+	}
+
+	if g.MailEnabled {
+		return "distribution"
+	}
+
+	return ""
+}
+
+func membershipTypeValue(g *group) string {
+	if expSlices.Contains(g.GroupTypes, "DynamicMembership") {
+		return "dynamic"
+	}
+
+	return "assigned"
+}
+
+func setGroupKeys() url.Values {
+	v := url.Values{}
+	v.Set("$select", strings.Join([]string{
+		"classification",
+		"description",
+		"displayName",
+		"groupTypes",
+		"id",
+		"mail",
+		"mailEnabled",
+		"onPremisesSecurityIdentifier",
+		"onPremisesSyncEnabled",
+		"securityEnabled",
+		"securityIdentifier",
+		"isAssignableToRole",
+		"isManagementRestricted",
+		"createdDateTime",
+	}, ","))
+	v.Set("$top", "999")
 	return v
 }

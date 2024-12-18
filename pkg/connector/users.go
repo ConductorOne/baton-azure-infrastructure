@@ -6,7 +6,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/conductorone/baton-azure-infrastructure/pkg/client"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -20,13 +19,14 @@ type userBuilder struct {
 	cn *Connector
 }
 
-func (u *userBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
+func (usr *userBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return userResourceType
 }
 
 // List returns all the users from the database as resource objects.
 // Users include a UserTrait because they are the 'shape' of a standard user.
 func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+	var userResources []*v2.Resource
 	l := ctxzap.Extract(ctx)
 	bag, err := parsePageToken(pToken.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
 	if err != nil {
@@ -38,7 +38,7 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 		reqURL = usr.cn.buildURL("users", setUserKeys())
 	}
 
-	resp := &client.UsersList{}
+	resp := &usersList{}
 	err = usr.cn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
 		return nil, "", nil, err
@@ -51,7 +51,7 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 
 	// If mailboxSettings is disabled, we can return the users without checking mailboxSettings.
 	if !usr.cn.MailboxSettings {
-		users, err := slices.ConvertErr(resp.Users, func(user *client.User) (*v2.Resource, error) {
+		users, err := slices.ConvertErr(resp.Users, func(user *user) (*v2.Resource, error) {
 			return userResource(ctx, user, parentResourceID)
 		})
 		if err != nil {
@@ -61,11 +61,10 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 		return users, pageToken, nil, nil
 	}
 
-	userResources := make([]*v2.Resource, 0, len(resp.Users))
 	// GET https://graph.microsoft.com/beta/users/{userId}/mailboxSettings
 	for _, ur := range resp.Users {
 		reqURL = usr.cn.buildURL(path.Join("users", ur.ID, "mailboxSettings"), setUserResponseKeys())
-		mailboxSettingsResp := &client.MailboxSettings{}
+		mailboxSettingsResp := &mailboxSettings{}
 		err = usr.cn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, mailboxSettingsResp)
 		if err != nil {
 			l.Warn(

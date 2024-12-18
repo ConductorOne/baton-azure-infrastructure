@@ -33,6 +33,22 @@ func TestUserBuilderList(t *testing.T) {
 	require.NotNil(t, res)
 }
 
+func TestGroupBuilderList(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	u := &groupBuilder{
+		cn: &connTest,
+	}
+	res, _, _, err := u.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
+	require.Nil(t, err)
+	require.NotNil(t, res)
+}
+
 func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecret, entraClientId string) (Connector, error) {
 	useCliCredentials := false
 	mailboxSettings := false
