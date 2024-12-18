@@ -33,6 +33,8 @@ const (
 	spTypeManagedIdentity     = "ManagedIdentity"
 	spTypeLegacy              = "Legacy"
 	spTypeSocialIdp           = "SocialIdp"
+	typeOwners                = "owners"
+	typeMembers               = "members"
 )
 
 func (g *groupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -85,14 +87,14 @@ func (g *groupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ 
 		ent.WithDescription(fmt.Sprintf("Owner of %s group", resource.DisplayName)),
 		ent.WithGrantableTo(userResourceType),
 	}
-	rv = append(rv, ent.NewPermissionEntitlement(resource, "owners", options...))
+	rv = append(rv, ent.NewPermissionEntitlement(resource, typeOwners, options...))
 
 	options = []ent.EntitlementOption{
 		ent.WithDisplayName(fmt.Sprintf("%s Group Member", resource.DisplayName)),
 		ent.WithDescription(fmt.Sprintf("Member of %s group", resource.DisplayName)),
 		ent.WithGrantableTo(userResourceType, groupResourceType),
 	}
-	rv = append(rv, ent.NewAssignmentEntitlement(resource, "members", options...))
+	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeMembers, options...))
 
 	return rv, "", nil, nil
 }
@@ -120,7 +122,7 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 		owenrsQuery.Set("$select", strings.Join([]string{"id"}, ","))
 		ownersURL := g.cn.buildBetaURL(path.Join("groups", resource.Id.Resource, "owners"), owenrsQuery)
 		b.Push(pagination.PageState{
-			ResourceTypeID: "owners",
+			ResourceTypeID: typeOwners,
 			Token:          ownersURL,
 		})
 
@@ -132,7 +134,7 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 
 		membersURL := g.cn.buildBetaURL(path.Join("groups", resource.Id.Resource, "members"), memberQuery)
 		b.Push(pagination.PageState{
-			ResourceTypeID: "members",
+			ResourceTypeID: typeMembers,
 			Token:          membersURL,
 		})
 	}
@@ -167,68 +169,7 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 		return nil, "", nil, err
 	}
 
-	grants, err := slices.ConvertErr(resp.Members, func(gm *membership) (*v2.Grant, error) {
-		var annos annotations.Annotations
-		objectID := resource.Id.GetResource()
-		rid := &v2.ResourceId{Resource: gm.Id}
-		switch gm.Type {
-		case odataTypeGroup:
-			rid.ResourceType = groupResourceType.Id
-			annos.Update(&v2.GrantExpandable{
-				EntitlementIds: []string{
-					fmt.Sprintf("group:%s:members", rid.Resource),
-				},
-			})
-		case odataTypeUser:
-			rid.ResourceType = userResourceType.Id
-		case odataTypeServicePrincipal:
-			switch gm.ServicePrincipalType {
-			case spTypeApplication:
-				rid.ResourceType = enterpriseApplicationResourceType.Id
-			case spTypeManagedIdentity:
-				rid.ResourceType = managedIdentitylResourceType.Id
-			case spTypeLegacy, spTypeSocialIdp, "":
-				// https://learn.microsoft.com/en-us/graph/api/resources/serviceprincipal?view=graph-rest-1.0
-				fallthrough
-			default:
-				if !g.knownServicePrincipalTypes[gm.ServicePrincipalType] {
-					// Only log once per sync per type, to reduce log spam and datadog costs
-					ctxzap.Extract(ctx).Warn(
-						"Grants: unsupported ServicePrincipalType type on Group Membership",
-						zap.String("type", gm.ServicePrincipalType),
-						zap.String("objectID", objectID),
-						zap.Any("membership", gm),
-					)
-					g.knownServicePrincipalTypes[gm.ServicePrincipalType] = true
-				}
-
-				return nil, nil
-			}
-		default:
-			if !g.knownGroupMembershipTypes[gm.Type] {
-				// Only log once per sync per type, to reduce log spam and datadog costs
-				ctxzap.Extract(ctx).Warn(
-					"Grants: unsupported resource type on Group Membership",
-					zap.String("type", gm.Type),
-					zap.String("objectID", objectID),
-					zap.Any("membership", gm),
-				)
-				g.knownGroupMembershipTypes[gm.Type] = true
-			}
-			return nil, nil
-		}
-		ur := &v2.Resource{Id: rid}
-		return &v2.Grant{
-			Id: fmtResourceGrant(resource.Id, ur.Id, objectID+":"+ps.ResourceTypeID),
-			Entitlement: &v2.Entitlement{
-				Id:       fmt.Sprintf("group:%s:%s", resource.Id.Resource, ps.ResourceTypeID),
-				Resource: resource,
-			},
-			Principal:   ur,
-			Annotations: annos,
-		}, nil
-	})
-
+	grants, err := getGroupGrants(ctx, resp, resource, g, ps)
 	if err != nil {
 		return nil, "", nil, err
 	}
