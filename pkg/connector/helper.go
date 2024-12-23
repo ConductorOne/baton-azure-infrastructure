@@ -15,6 +15,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	pagination "github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	sdkResource "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	zap "go.uber.org/zap"
 	expSlices "golang.org/x/exp/slices"
@@ -366,4 +367,24 @@ func getGroupGrantURL(principal *v2.Resource) string {
 		Host:   "graph.microsoft.com",
 		Path:   path.Join("v1.0", "directoryObjects", principal.Id.Resource),
 	}).String()
+}
+
+func subscriptionResource(ctx context.Context, s *Subscription) (*v2.Resource, error) {
+	var appTraitOpts []sdkResource.AppTraitOption
+	profile := map[string]interface{}{
+		"subscriptionId": s.SubscriptionID,
+		"tenantId":       s.TenantID,
+		"displayName":    s.DisplayName,
+		"state":          s.State,
+	}
+
+	appTraitOpts = append(appTraitOpts, sdkResource.WithAppProfile(profile))
+	return sdkResource.NewAppResource(
+		s.DisplayName,
+		subscriptionsResourceType,
+		s.SubscriptionID,
+		appTraitOpts,
+		sdkResource.WithAnnotation(&v2.V1Identifier{
+			Id: s.SubscriptionID,
+		}))
 }

@@ -199,7 +199,7 @@ func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitl
 		// https://learn.microsoft.com/en-us/graph/api/group-post-members?view=graph-rest-1.0&tabs=http
 		reqURL = g.cn.buildURL(path.Join("groups", groupID, "members", "$ref"), url.Values{})
 	default:
-		return nil, errors.New("baton-azure-infrastructure: only can provision membership or owners entitlements to a group")
+		return nil, errors.New("baton-azure-infrastructure: only members can provision membership or owners entitlements to a group")
 	}
 
 	objRef := getGroupGrantURL(principal)

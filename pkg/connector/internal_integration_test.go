@@ -60,3 +60,18 @@ func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecre
 
 	return *cb, nil
 }
+
+func TestSubscriptionBuilderList(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	u := &subscriptionBuilder{
+		cn: &connTest,
+	}
+	_, _, _, err = u.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
+	require.Nil(t, err)
+}

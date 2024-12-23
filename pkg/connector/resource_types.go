@@ -31,4 +31,10 @@ var (
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER},
 		Annotations: annotations.New(&v2.SkipEntitlementsAndGrants{}),
 	}
+
+	subscriptionsResourceType = &v2.ResourceType{
+		Id:          "subscriptions",
+		DisplayName: "Subscriptions Application",
+		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_APP},
+	}
 )

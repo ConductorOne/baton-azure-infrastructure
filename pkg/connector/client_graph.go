@@ -100,17 +100,17 @@ func (c *Connector) query(ctx context.Context, scopes []string, method string, r
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("microsoft-entra: failed to send request: %w", err)
+		return fmt.Errorf("microsoft-azure-infrastructure: failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	rawResp, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("microsoft-entra: failed to read response body: %w", err)
+		return fmt.Errorf("microsoft-azure-infrastructure: failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("microsoft-entra: %s '%s' %w", method, requestURL, ErrNotFound)
+		return fmt.Errorf("microsoft-azure-infrastructure: %s '%s' %w", method, requestURL, ErrNotFound)
 	}
 
 	if res != nil && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
