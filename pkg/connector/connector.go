@@ -16,7 +16,6 @@ import (
 
 type Connector struct {
 	token           azcore.TokenCredential
-	client          *http.Client
 	httpClient      *uhttp.BaseHttpClient
 	MailboxSettings bool
 	SkipAdGroups    bool
@@ -79,20 +78,21 @@ func New(ctx context.Context, useCliCredentials bool, tenantID, clientID, client
 		return nil, err
 	}
 
-	options := azcore.ClientOptions{
-		Transport: httpClient,
-	}
 	switch {
 	case useCliCredentials:
 		cred, err = azidentity.NewAzureCLICredential(nil)
-	case tenantID != "" && clientID != "" && clientSecret != "":
+	case !IsEmpty(tenantID) && !IsEmpty(clientID) && !IsEmpty(clientSecret):
 		cred, err = azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, &azidentity.ClientSecretCredentialOptions{
-			ClientOptions: options,
+			ClientOptions: azcore.ClientOptions{
+				Transport: httpClient,
+			},
 		})
 	default:
 		cred, err = azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
-			ClientOptions: options,
-			TenantID:      tenantID,
+			ClientOptions: azcore.ClientOptions{
+				Transport: httpClient,
+			},
+			TenantID: tenantID,
 		})
 	}
 	if err != nil {
