@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +11,8 @@ import (
 	"strconv"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
+	uhttp "github.com/conductorone/baton-sdk/pkg/uhttp"
 )
 
 const (
@@ -68,6 +69,10 @@ func (c *Connector) buildURL(reqPath string, v url.Values) string {
 	return ux.String()
 }
 
+func WithBearerToken(token string) uhttp.RequestOption {
+	return uhttp.WithHeader("Authorization", "Bearer "+token)
+}
+
 func (c *Connector) buildBetaURL(reqPath string, v url.Values) string {
 	ux := url.URL{
 		Scheme:   "https",
@@ -78,12 +83,62 @@ func (c *Connector) buildBetaURL(reqPath string, v url.Values) string {
 	return ux.String()
 }
 
-func (c *Connector) query(ctx context.Context, scopes []string, method string, requestURL string, body io.Reader, res interface{}) error {
-	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
+func (c *Connector) doRequest(ctx context.Context,
+	method,
+	endpointUrl string,
+	token string,
+	res interface{},
+	body interface{},
+) (http.Header, annotations.Annotations, error) {
+	urlAddress, err := url.Parse(endpointUrl)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
+	req, err := c.httpClient.NewRequest(ctx,
+		method,
+		urlAddress,
+		uhttp.WithContentTypeJSONHeader(),
+		WithBearerToken(token),
+		uhttp.WithHeader("ConsistencyLevel", "eventual"),
+		uhttp.WithJSONBody(body),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resp, err := c.httpClient.Do(req, uhttp.WithResponse(&res))
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	rawResp, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("microsoft-azure-infrastructure: failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil, fmt.Errorf("microsoft-azure-infrastructure: %s '%s' %w", method, urlAddress.String(), ErrNotFound)
+	}
+
+	if res != nil && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
+		return nil, nil, newHTTPError(resp, string(rawResp), ErrNoResponse)
+	}
+
+	if resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusNoContent &&
+		resp.StatusCode != http.StatusCreated {
+		return nil, nil, newHTTPError(resp, string(rawResp), ErrRequestFailed)
+	}
+
+	return resp.Header, nil, nil
+}
+
+func (c *Connector) query(ctx context.Context, scopes []string, method string, requestURL string, body io.Reader, res interface{}) error {
 	token, err := c.token.GetToken(ctx, policy.TokenRequestOptions{
 		Scopes: scopes,
 	})
@@ -91,42 +146,9 @@ func (c *Connector) query(ctx context.Context, scopes []string, method string, r
 		return err
 	}
 
-	req.Header["Authorization"] = []string{fmt.Sprintf("Bearer %s", token.Token)}
-	if body != nil {
-		req.Header["Content-Type"] = []string{"application/json"}
-	}
-	// Needed to get certain filters working
-	req.Header["ConsistencyLevel"] = []string{"eventual"}
-
-	resp, err := c.client.Do(req)
+	_, _, err = c.doRequest(ctx, method, requestURL, token.Token, res, body)
 	if err != nil {
-		return fmt.Errorf("microsoft-azure-infrastructure: failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	rawResp, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("microsoft-azure-infrastructure: failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("microsoft-azure-infrastructure: %s '%s' %w", method, requestURL, ErrNotFound)
-	}
-
-	if res != nil && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
-		return newHTTPError(resp, string(rawResp), ErrNoResponse)
-	}
-
-	if resp.StatusCode != http.StatusOK &&
-		resp.StatusCode != http.StatusNoContent &&
-		resp.StatusCode != http.StatusCreated {
-		return newHTTPError(resp, string(rawResp), ErrRequestFailed)
-	}
-
-	if res != nil {
-		if err := json.Unmarshal(rawResp, res); err != nil {
-			return err
-		}
+		return err
 	}
 
 	return nil

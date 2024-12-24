@@ -28,7 +28,7 @@ func (s *subscriptionBuilder) List(ctx context.Context, parentResourceID *v2.Res
 
 	reqURL := bag.PageToken()
 	if reqURL == "" {
-		reqURL = "https://management.azure.com/subscriptions?api-version=2024-08-01"
+		reqURL = subscriptionURL()
 	}
 
 	resp := &SubscriptionList{}

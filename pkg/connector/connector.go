@@ -17,6 +17,7 @@ import (
 type Connector struct {
 	token           azcore.TokenCredential
 	client          *http.Client
+	httpClient      *uhttp.BaseHttpClient
 	MailboxSettings bool
 	SkipAdGroups    bool
 }
@@ -50,21 +51,15 @@ func (d *Connector) Validate(ctx context.Context) (annotations.Annotations, erro
 	return nil, nil
 }
 
-func NewConnectorFromToken(ctx context.Context, token azcore.TokenCredential, mailboxSettings bool, skipAdGroups bool) (*Connector, error) {
-	uhttpOptions := []uhttp.Option{
-		uhttp.WithLogger(true, ctxzap.Extract(ctx)),
-	}
-	httpClient, err := uhttp.NewClient(
-		ctx,
-		uhttpOptions...,
-	)
+func NewConnectorFromToken(ctx context.Context, httpClient *http.Client, token azcore.TokenCredential, mailboxSettings bool, skipAdGroups bool) (*Connector, error) {
+	clientWithContext, err := uhttp.NewBaseHttpClientWithContext(context.Background(), httpClient)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Connector{
 		token:           token,
-		client:          httpClient,
+		httpClient:      clientWithContext,
 		MailboxSettings: mailboxSettings,
 		SkipAdGroups:    skipAdGroups,
 	}, nil
@@ -104,5 +99,5 @@ func New(ctx context.Context, useCliCredentials bool, tenantID, clientID, client
 		return nil, err
 	}
 
-	return NewConnectorFromToken(ctx, cred, mailboxSettings, skipAdGroups)
+	return NewConnectorFromToken(ctx, httpClient, cred, mailboxSettings, skipAdGroups)
 }

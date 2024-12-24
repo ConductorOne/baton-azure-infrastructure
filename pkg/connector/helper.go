@@ -15,7 +15,6 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	pagination "github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
-	sdkResource "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	zap "go.uber.org/zap"
 	expSlices "golang.org/x/exp/slices"
@@ -370,7 +369,7 @@ func getGroupGrantURL(principal *v2.Resource) string {
 }
 
 func subscriptionResource(ctx context.Context, s *Subscription) (*v2.Resource, error) {
-	var appTraitOpts []sdkResource.AppTraitOption
+	var appTraitOpts []rs.AppTraitOption
 	profile := map[string]interface{}{
 		"subscriptionId": s.SubscriptionID,
 		"tenantId":       s.TenantID,
@@ -378,13 +377,22 @@ func subscriptionResource(ctx context.Context, s *Subscription) (*v2.Resource, e
 		"state":          s.State,
 	}
 
-	appTraitOpts = append(appTraitOpts, sdkResource.WithAppProfile(profile))
-	return sdkResource.NewAppResource(
+	appTraitOpts = append(appTraitOpts, rs.WithAppProfile(profile))
+	return rs.NewAppResource(
 		s.DisplayName,
 		subscriptionsResourceType,
 		s.SubscriptionID,
 		appTraitOpts,
-		sdkResource.WithAnnotation(&v2.V1Identifier{
+		rs.WithAnnotation(&v2.V1Identifier{
 			Id: s.SubscriptionID,
 		}))
+}
+
+func subscriptionURL() string {
+	return (&url.URL{
+		Scheme:   "https",
+		Host:     "management.azure.com",
+		Path:     "/subscriptions",
+		RawQuery: "api-version=2024-08-01",
+	}).String()
 }
