@@ -51,14 +51,14 @@ func (d *Connector) Validate(ctx context.Context) (annotations.Annotations, erro
 }
 
 func NewConnectorFromToken(ctx context.Context, httpClient *http.Client, token azcore.TokenCredential, mailboxSettings bool, skipAdGroups bool) (*Connector, error) {
-	clientWithContext, err := uhttp.NewBaseHttpClientWithContext(context.Background(), httpClient)
+	client, err := uhttp.NewBaseHttpClientWithContext(ctx, httpClient)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Connector{
 		token:           token,
-		httpClient:      clientWithContext,
+		httpClient:      client,
 		MailboxSettings: mailboxSettings,
 		SkipAdGroups:    skipAdGroups,
 	}, nil
