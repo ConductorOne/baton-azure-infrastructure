@@ -115,3 +115,14 @@ type Promotions struct {
 	Category    string    `json:"category,omitempty"`
 	EndDateTime time.Time `json:"endDateTime,omitempty"`
 }
+
+type TenantList struct {
+	Tenant   []tenant `json:"value,omitempty"`
+	NextLink string   `json:"nextLink,omitempty"`
+}
+
+type tenant struct {
+	ID             string `json:"id,omitempty"`
+	TenantID       string `json:"tenantId,omitempty"`
+	TenantCategory string `json:"tenantCategory,omitempty"`
+}

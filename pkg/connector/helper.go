@@ -396,3 +396,37 @@ func subscriptionURL() string {
 		RawQuery: "api-version=2024-08-01",
 	}).String()
 }
+
+func tenantURL() string {
+	return (&url.URL{
+		Scheme:   "https",
+		Host:     "management.azure.com",
+		Path:     "/tenants",
+		RawQuery: "api-version=2024-08-01",
+	}).String()
+}
+
+func tenantResource(ctx context.Context, t *tenant) (*v2.Resource, error) {
+	var opts []rs.ResourceOption
+	profile := map[string]interface{}{
+		"tenantId":       t.TenantID,
+		"tenantCategory": t.TenantCategory,
+	}
+
+	projectTraitOptions := []rs.AppTraitOption{
+		rs.WithAppProfile(profile),
+	}
+
+	opts = append(opts, rs.WithAppTrait(projectTraitOptions...))
+	resource, err := rs.NewResource(
+		t.TenantID,
+		tenantResourceType,
+		t.TenantID,
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return resource, nil
+}

@@ -138,7 +138,7 @@ func (c *Connector) doRequest(ctx context.Context,
 	return resp.Header, nil, nil
 }
 
-func (c *Connector) query(ctx context.Context, scopes []string, method string, requestURL string, body io.Reader, res interface{}) error {
+func (c *Connector) query(ctx context.Context, scopes []string, method, requestURL string, body io.Reader, res interface{}) error {
 	token, err := c.token.GetToken(ctx, policy.TokenRequestOptions{
 		Scopes: scopes,
 	})

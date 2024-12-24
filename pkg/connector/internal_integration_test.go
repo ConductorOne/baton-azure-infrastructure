@@ -69,9 +69,24 @@ func TestSubscriptionBuilderList(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	u := &subscriptionBuilder{
+	s := &subscriptionBuilder{
 		cn: &connTest,
 	}
-	_, _, _, err = u.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
+	_, _, _, err = s.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
+	require.Nil(t, err)
+}
+
+func TestTenantBuilderList(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	tn := &tenantBuilder{
+		cn: &connTest,
+	}
+	_, _, _, err = tn.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
 }

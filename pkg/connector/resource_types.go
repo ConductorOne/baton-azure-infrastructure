@@ -33,8 +33,13 @@ var (
 	}
 
 	subscriptionsResourceType = &v2.ResourceType{
-		Id:          "subscriptions",
-		DisplayName: "Subscriptions Application",
+		Id:          "subscription",
+		DisplayName: "Subscription",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_APP},
+	}
+
+	tenantResourceType = &v2.ResourceType{
+		Id:          "tenant",
+		DisplayName: "Tenant",
 	}
 )
