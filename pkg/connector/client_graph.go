@@ -89,10 +89,10 @@ func (c *Connector) doRequest(ctx context.Context,
 	token string,
 	res interface{},
 	body interface{},
-) (http.Header, annotations.Annotations, error) {
+) (annotations.Annotations, error) {
 	urlAddress, err := url.Parse(endpointUrl)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	req, err := c.httpClient.NewRequest(ctx,
@@ -104,7 +104,7 @@ func (c *Connector) doRequest(ctx context.Context,
 		uhttp.WithJSONBody(body),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	resp, err := c.httpClient.Do(req, uhttp.WithResponse(&res))
@@ -113,29 +113,29 @@ func (c *Connector) doRequest(ctx context.Context,
 	}
 
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	rawResp, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, nil, fmt.Errorf("microsoft-azure-infrastructure: failed to read response body: %w", err)
+		return nil, fmt.Errorf("microsoft-azure-infrastructure: failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil, fmt.Errorf("microsoft-azure-infrastructure: %s '%s' %w", method, urlAddress.String(), ErrNotFound)
+		return nil, fmt.Errorf("microsoft-azure-infrastructure: %s '%s' %w", method, urlAddress.String(), ErrNotFound)
 	}
 
 	if res != nil && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
-		return nil, nil, newHTTPError(resp, string(rawResp), ErrNoResponse)
+		return nil, newHTTPError(resp, string(rawResp), ErrNoResponse)
 	}
 
 	if resp.StatusCode != http.StatusOK &&
 		resp.StatusCode != http.StatusNoContent &&
 		resp.StatusCode != http.StatusCreated {
-		return nil, nil, newHTTPError(resp, string(rawResp), ErrRequestFailed)
+		return nil, newHTTPError(resp, string(rawResp), ErrRequestFailed)
 	}
 
-	return resp.Header, nil, nil
+	return nil, nil
 }
 
 func (c *Connector) query(ctx context.Context, scopes []string, method, requestURL string, body io.Reader, res interface{}) error {
@@ -146,7 +146,7 @@ func (c *Connector) query(ctx context.Context, scopes []string, method, requestU
 		return err
 	}
 
-	_, _, err = c.doRequest(ctx, method, requestURL, token.Token, res, body)
+	_, err = c.doRequest(ctx, method, requestURL, token.Token, res, body)
 	if err != nil {
 		return err
 	}

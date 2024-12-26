@@ -388,6 +388,7 @@ func subscriptionResource(ctx context.Context, s *Subscription) (*v2.Resource, e
 		}))
 }
 
+// https://learn.microsoft.com/es-es/rest/api/subscription/subscriptions/list?view=rest-subscription-2021-10-01&tabs=HTTP
 func subscriptionURL() string {
 	return (&url.URL{
 		Scheme:   "https",
@@ -397,6 +398,7 @@ func subscriptionURL() string {
 	}).String()
 }
 
+// https://learn.microsoft.com/es-es/rest/api/subscription/tenants/list?view=rest-subscription-2021-10-01&tabs=HTTP
 func tenantURL() string {
 	return (&url.URL{
 		Scheme:   "https",
@@ -422,6 +424,43 @@ func tenantResource(ctx context.Context, t *tenant) (*v2.Resource, error) {
 		t.TenantID,
 		tenantResourceType,
 		t.TenantID,
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return resource, nil
+}
+
+// https://learn.microsoft.com/es-es/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
+func resourceGroupURL(subscriptionId string) string {
+	return (&url.URL{
+		Scheme:   "https",
+		Host:     "management.azure.com",
+		Path:     fmt.Sprintf("%s/%s/%s", "subscriptions", subscriptionId, "resourcegroups"),
+		RawQuery: "api-version=2024-08-01",
+	}).String()
+}
+
+func groupListResource(ctx context.Context, rg *resourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+	var opts []rs.ResourceOption
+	profile := map[string]interface{}{
+		"id":       rg.ID,
+		"name":     rg.Name,
+		"type":     rg.Type,
+		"location": rg.Location,
+	}
+
+	projectTraitOptions := []rs.AppTraitOption{
+		rs.WithAppProfile(profile),
+	}
+
+	opts = append(opts, rs.WithAppTrait(projectTraitOptions...))
+	resource, err := rs.NewResource(
+		rg.ID,
+		resourceGroupResourceType,
+		rg.Name,
 		opts...,
 	)
 	if err != nil {

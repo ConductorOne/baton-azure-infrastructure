@@ -28,6 +28,7 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newGroupBuilder(d),
 		newSubscriptionBuilder(d),
 		newTenantBuilder(d),
+		newResourceGroupBuilder(d),
 	}
 }
 

@@ -42,4 +42,9 @@ var (
 		Id:          "tenant",
 		DisplayName: "Tenant",
 	}
+
+	resourceGroupResourceType = &v2.ResourceType{
+		Id:          "resource-group",
+		DisplayName: "Resource Group",
+	}
 )

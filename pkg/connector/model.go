@@ -126,3 +126,20 @@ type tenant struct {
 	TenantID       string `json:"tenantId,omitempty"`
 	TenantCategory string `json:"tenantCategory,omitempty"`
 }
+
+type ResourceGroupList struct {
+	ResourceGroup []resourceGroup `json:"value,omitempty"`
+}
+
+type resourceGroup struct {
+	ID         string     `json:"id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+	Type       string     `json:"type,omitempty"`
+	Location   string     `json:"location,omitempty"`
+	Tags       Tags       `json:"tags,omitempty"`
+	Properties properties `json:"properties,omitempty"`
+}
+
+type properties struct {
+	ProvisioningState string `json:"provisioningState,omitempty"`
+}
