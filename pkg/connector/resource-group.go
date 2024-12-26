@@ -2,8 +2,9 @@ package connector
 
 import (
 	"context"
-	"net/http"
 
+	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
+	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -19,49 +20,50 @@ func (rg *resourceGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceTy
 
 func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
-	bag, err := parsePageToken(pToken.Token, &v2.ResourceId{ResourceType: groupResourceType.Id})
+	clientFactory, err := armsubscription.NewClientFactory(rg.cn.token, nil)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	reqURL := bag.PageToken()
-	if reqURL == "" {
-		reqURL = subscriptionURL()
-	}
-
-	resp := &SubscriptionList{}
-	err = rg.cn.query(ctx, scopes, http.MethodGet, reqURL, nil, resp)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	for _, subscription := range resp.Subscription {
-		reqURL = resourceGroupURL(subscription.SubscriptionID)
-		respGroupList := &ResourceGroupList{}
-		errGroupList := rg.cn.query(ctx, scopes, http.MethodGet, reqURL, nil, respGroupList)
-		if errGroupList != nil {
-			return nil, "", nil, errGroupList
+	pagerSubscriptions := clientFactory.NewSubscriptionsClient().NewListPager(nil)
+	for pagerSubscriptions.More() {
+		page, err := pagerSubscriptions.NextPage(ctx)
+		if err != nil {
+			return nil, "", nil, err
 		}
 
-		for _, groupList := range respGroupList.ResourceGroup {
-			gr, err := groupListResource(ctx, &groupList, &v2.ResourceId{
-				ResourceType: subscriptionsResourceType.Id,
-				Resource:     subscription.SubscriptionID,
-			})
+		for _, subscription := range page.Value {
+			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, rg.cn.token, nil)
 			if err != nil {
 				return nil, "", nil, err
 			}
 
-			rv = append(rv, gr)
+			for pager := client.NewListPager(nil); pager.More(); {
+				page, err := pager.NextPage(ctx)
+				if err != nil {
+					return nil, "", nil, err
+				}
+
+				// NOTE: The service desides how many items to return on a page.
+				// If a page has 0 items, go get the next page.
+				// Other clients may be adding/deleting items from the collection while
+				// this code is paging; some items may be skipped or returned multiple times.
+				for _, groupList := range page.Value {
+					gr, err := groupListResource(ctx, groupList, &v2.ResourceId{
+						ResourceType: subscriptionsResourceType.Id,
+						Resource:     StringValue(subscription.SubscriptionID),
+					})
+					if err != nil {
+						return nil, "", nil, err
+					}
+
+					rv = append(rv, gr)
+				}
+			}
 		}
 	}
 
-	pageToken, err := bag.NextToken(resp.NextLink)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	return rv, pageToken, nil, nil
+	return rv, "", nil, nil
 }
 
 func (rg *resourceGroupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {

@@ -1,7 +1,5 @@
 package connector
 
-import "time"
-
 type manager struct {
 	Id          string `json:"id,omitempty"`
 	EmployeeId  string `json:"employeeId,omitempty"`
@@ -72,75 +70,4 @@ type membership struct {
 
 type assignment struct {
 	ObjectRef string `json:"@odata.id"`
-}
-
-type SubscriptionPolicies struct {
-	LocationPlacementID string `json:"locationPlacementId,omitempty"`
-	QuotaID             string `json:"quotaId,omitempty"`
-	SpendingLimit       string `json:"spendingLimit,omitempty"`
-}
-
-type ManagedByTenants struct {
-	TenantID string `json:"tenantId,omitempty"`
-}
-
-type Tags struct {
-	TagKey1 string `json:"tagKey1,omitempty"`
-	TagKey2 string `json:"tagKey2,omitempty"`
-}
-
-type SubscriptionList struct {
-	Subscription []Subscription `json:"value,omitempty"`
-	Count        Count          `json:"count,omitempty"`
-	NextLink     string         `json:"nextLink,omitempty"`
-}
-
-type Subscription struct {
-	ID                   string               `json:"id,omitempty"`
-	SubscriptionID       string               `json:"subscriptionId,omitempty"`
-	TenantID             string               `json:"tenantId,omitempty"`
-	DisplayName          string               `json:"displayName,omitempty"`
-	State                string               `json:"state,omitempty"`
-	SubscriptionPolicies SubscriptionPolicies `json:"subscriptionPolicies,omitempty"`
-	AuthorizationSource  string               `json:"authorizationSource,omitempty"`
-	ManagedByTenants     []ManagedByTenants   `json:"managedByTenants,omitempty"`
-	Tags                 Tags                 `json:"tags,omitempty"`
-}
-type Count struct {
-	Type  string `json:"type,omitempty"`
-	Value int    `json:"value,omitempty"`
-}
-
-type Promotions struct {
-	Category    string    `json:"category,omitempty"`
-	EndDateTime time.Time `json:"endDateTime,omitempty"`
-}
-
-type TenantList struct {
-	Tenant   []tenant `json:"value,omitempty"`
-	NextLink string   `json:"nextLink,omitempty"`
-}
-
-type tenant struct {
-	ID             string `json:"id,omitempty"`
-	TenantID       string `json:"tenantId,omitempty"`
-	TenantCategory string `json:"tenantCategory,omitempty"`
-}
-
-type ResourceGroupList struct {
-	ResourceGroup []resourceGroup `json:"value,omitempty"`
-	NextLink      string          `json:"nextLink,omitempty"`
-}
-
-type resourceGroup struct {
-	ID         string     `json:"id,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	Type       string     `json:"type,omitempty"`
-	Location   string     `json:"location,omitempty"`
-	Tags       Tags       `json:"tags,omitempty"`
-	Properties properties `json:"properties,omitempty"`
-}
-
-type properties struct {
-	ProvisioningState string `json:"provisioningState,omitempty"`
 }

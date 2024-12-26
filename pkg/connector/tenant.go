@@ -2,8 +2,8 @@ package connector
 
 import (
 	"context"
-	"net/http"
 
+	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -19,37 +19,29 @@ func (t *tenantBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 
 func (t *tenantBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
-	bag, err := parsePageToken(pToken.Token, &v2.ResourceId{ResourceType: groupResourceType.Id})
+	clientFactory, err := armsubscription.NewClientFactory(t.cn.token, nil)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	reqURL := bag.PageToken()
-	if reqURL == "" {
-		reqURL = tenantURL()
-	}
-
-	resp := &TenantList{}
-	err = t.cn.query(ctx, scopes, http.MethodGet, reqURL, nil, resp)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	for _, tenant := range resp.Tenant {
-		sr, err := tenantResource(ctx, &tenant)
+	pager := clientFactory.NewTenantsClient().NewListPager(nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
 		if err != nil {
 			return nil, "", nil, err
 		}
 
-		rv = append(rv, sr)
+		for _, tenant := range page.Value {
+			sr, err := tenantResource(ctx, tenant)
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			rv = append(rv, sr)
+		}
 	}
 
-	pageToken, err := bag.NextToken(resp.NextLink)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	return rv, pageToken, nil, nil
+	return rv, "", nil, nil
 }
 
 func (t *tenantBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {

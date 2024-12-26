@@ -2,8 +2,8 @@ package connector
 
 import (
 	"context"
-	"net/http"
 
+	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -13,45 +13,35 @@ type subscriptionBuilder struct {
 	cn *Connector
 }
 
-var scopes = []string{"https://management.azure.com/.default"}
-
 func (s *subscriptionBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return subscriptionsResourceType
 }
 
 func (s *subscriptionBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
-	bag, err := parsePageToken(pToken.Token, &v2.ResourceId{ResourceType: groupResourceType.Id})
+	clientFactory, err := armsubscription.NewClientFactory(s.cn.token, nil)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	reqURL := bag.PageToken()
-	if reqURL == "" {
-		reqURL = subscriptionURL()
-	}
-
-	resp := &SubscriptionList{}
-	err = s.cn.query(ctx, scopes, http.MethodGet, reqURL, nil, resp)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	for _, subscription := range resp.Subscription {
-		sr, err := subscriptionResource(ctx, &subscription)
+	pager := clientFactory.NewSubscriptionsClient().NewListPager(nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
 		if err != nil {
 			return nil, "", nil, err
 		}
 
-		rv = append(rv, sr)
+		for _, subscription := range page.Value {
+			sr, err := subscriptionResource(ctx, subscription)
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			rv = append(rv, sr)
+		}
 	}
 
-	pageToken, err := bag.NextToken(resp.NextLink)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	return rv, pageToken, nil, nil
+	return rv, "", nil, nil
 }
 
 func (s *subscriptionBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {

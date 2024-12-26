@@ -10,6 +10,8 @@ import (
 	"path"
 	"strings"
 
+	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
+	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -368,62 +370,43 @@ func getGroupGrantURL(principal *v2.Resource) string {
 	}).String()
 }
 
-func subscriptionResource(ctx context.Context, s *Subscription) (*v2.Resource, error) {
+// https://learn.microsoft.com/es-es/rest/api/subscription/subscriptions/list?view=rest-subscription-2021-10-01&tabs=HTTP
+func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) (*v2.Resource, error) {
 	var appTraitOpts []rs.AppTraitOption
 	profile := map[string]interface{}{
-		"subscriptionId": s.SubscriptionID,
-		"tenantId":       s.TenantID,
-		"displayName":    s.DisplayName,
-		"state":          s.State,
+		"subscriptionId": StringValue(s.SubscriptionID),
+		"displayName":    StringValue(s.DisplayName),
+		"state":          StringValue((*string)(s.State)),
 	}
 
 	appTraitOpts = append(appTraitOpts, rs.WithAppProfile(profile))
 	return rs.NewAppResource(
-		s.DisplayName,
+		StringValue(s.DisplayName),
 		subscriptionsResourceType,
-		s.SubscriptionID,
+		StringValue(s.SubscriptionID),
 		appTraitOpts,
 		rs.WithAnnotation(&v2.V1Identifier{
-			Id: s.SubscriptionID,
+			Id: StringValue(s.SubscriptionID),
 		}))
 }
 
-// https://learn.microsoft.com/es-es/rest/api/subscription/subscriptions/list?view=rest-subscription-2021-10-01&tabs=HTTP
-func subscriptionURL() string {
-	return (&url.URL{
-		Scheme:   "https",
-		Host:     "management.azure.com",
-		Path:     "/subscriptions",
-		RawQuery: "api-version=2024-08-01",
-	}).String()
-}
-
 // https://learn.microsoft.com/es-es/rest/api/subscription/tenants/list?view=rest-subscription-2021-10-01&tabs=HTTP
-func tenantURL() string {
-	return (&url.URL{
-		Scheme:   "https",
-		Host:     "management.azure.com",
-		Path:     "/tenants",
-		RawQuery: "api-version=2024-08-01",
-	}).String()
-}
-
-func tenantResource(ctx context.Context, t *tenant) (*v2.Resource, error) {
+func tenantResource(ctx context.Context, t *armsubscription.TenantIDDescription) (*v2.Resource, error) {
 	var opts []rs.ResourceOption
 	profile := map[string]interface{}{
-		"tenantId":       t.TenantID,
-		"tenantCategory": t.TenantCategory,
+		"tenantId":       StringValue(t.ID),
+		"tenantCategory": StringValue(t.TenantID),
 	}
 
-	projectTraitOptions := []rs.AppTraitOption{
+	tenantTraitOptions := []rs.AppTraitOption{
 		rs.WithAppProfile(profile),
 	}
 
-	opts = append(opts, rs.WithAppTrait(projectTraitOptions...))
+	opts = append(opts, rs.WithAppTrait(tenantTraitOptions...))
 	resource, err := rs.NewResource(
-		"Tenant-"+t.TenantID,
+		StringValue(t.TenantID),
 		tenantResourceType,
-		t.TenantID,
+		StringValue(t.TenantID),
 		opts...,
 	)
 	if err != nil {
@@ -434,33 +417,24 @@ func tenantResource(ctx context.Context, t *tenant) (*v2.Resource, error) {
 }
 
 // https://learn.microsoft.com/es-es/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
-func resourceGroupURL(subscriptionId string) string {
-	return (&url.URL{
-		Scheme:   "https",
-		Host:     "management.azure.com",
-		Path:     fmt.Sprintf("%s/%s/%s", "subscriptions", subscriptionId, "resourcegroups"),
-		RawQuery: "api-version=2024-08-01",
-	}).String()
-}
-
-func groupListResource(ctx context.Context, rg *resourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func groupListResource(ctx context.Context, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var opts []rs.ResourceOption
 	profile := map[string]interface{}{
-		"id":       rg.ID,
-		"name":     rg.Name,
-		"type":     rg.Type,
-		"location": rg.Location,
+		"id":       StringValue(rg.ID),
+		"name":     StringValue(rg.Name),
+		"type":     StringValue(rg.Type),
+		"location": StringValue(rg.Location),
 	}
 
-	projectTraitOptions := []rs.AppTraitOption{
+	groupListTraitOptions := []rs.AppTraitOption{
 		rs.WithAppProfile(profile),
 	}
 
-	opts = append(opts, rs.WithAppTrait(projectTraitOptions...), rs.WithParentResourceID(parentResourceID))
+	opts = append(opts, rs.WithAppTrait(groupListTraitOptions...), rs.WithParentResourceID(parentResourceID))
 	resource, err := rs.NewResource(
-		"resourceGroup-"+rg.Name,
+		StringValue(rg.Name),
 		resourceGroupResourceType,
-		rg.Name,
+		StringValue(rg.Name),
 		opts...,
 	)
 	if err != nil {
@@ -468,4 +442,24 @@ func groupListResource(ctx context.Context, rg *resourceGroup, parentResourceID 
 	}
 
 	return resource, nil
+}
+
+// StringValue returns the value of the string pointer passed in or
+// "" if the pointer is nil.
+func StringValue(v *string) string {
+	if v != nil {
+		return *v
+	}
+
+	return ""
+}
+
+// BoolValue returns the value of the bool pointer passed in or
+// false if the pointer is nil.
+func BoolValue(v *bool) bool {
+	if v != nil {
+		return *v
+	}
+
+	return false
 }
