@@ -421,7 +421,7 @@ func tenantResource(ctx context.Context, t *tenant) (*v2.Resource, error) {
 
 	opts = append(opts, rs.WithAppTrait(projectTraitOptions...))
 	resource, err := rs.NewResource(
-		t.TenantID,
+		"Tenant-"+t.TenantID,
 		tenantResourceType,
 		t.TenantID,
 		opts...,
@@ -456,9 +456,9 @@ func groupListResource(ctx context.Context, rg *resourceGroup, parentResourceID 
 		rs.WithAppProfile(profile),
 	}
 
-	opts = append(opts, rs.WithAppTrait(projectTraitOptions...))
+	opts = append(opts, rs.WithAppTrait(projectTraitOptions...), rs.WithParentResourceID(parentResourceID))
 	resource, err := rs.NewResource(
-		rg.ID,
+		"resourceGroup-"+rg.Name,
 		resourceGroupResourceType,
 		rg.Name,
 		opts...,

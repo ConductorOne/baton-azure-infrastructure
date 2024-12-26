@@ -129,6 +129,7 @@ type tenant struct {
 
 type ResourceGroupList struct {
 	ResourceGroup []resourceGroup `json:"value,omitempty"`
+	NextLink      string          `json:"nextLink,omitempty"`
 }
 
 type resourceGroup struct {

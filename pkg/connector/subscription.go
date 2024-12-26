@@ -43,25 +43,6 @@ func (s *subscriptionBuilder) List(ctx context.Context, parentResourceID *v2.Res
 			return nil, "", nil, err
 		}
 
-		reqURL = resourceGroupURL(subscription.SubscriptionID)
-		respGroupList := &ResourceGroupList{}
-		errGroupList := s.cn.query(ctx, scopes, http.MethodGet, reqURL, nil, respGroupList)
-		if errGroupList != nil {
-			return nil, "", nil, errGroupList
-		}
-
-		for _, groupList := range respGroupList.ResourceGroup {
-			gr, err := groupListResource(ctx, &groupList, &v2.ResourceId{
-				ResourceType: subscriptionsResourceType.Id,
-				Resource:     subscription.SubscriptionID,
-			})
-			if err != nil {
-				return nil, "", nil, err
-			}
-
-			rv = append(rv, gr)
-		}
-
 		rv = append(rv, sr)
 	}
 

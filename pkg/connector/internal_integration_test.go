@@ -90,3 +90,18 @@ func TestTenantBuilderList(t *testing.T) {
 	_, _, _, err = tn.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
 }
+
+func TestResourceGroupBuilderList(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	rg := &resourceGroupBuilder{
+		cn: &connTest,
+	}
+	_, _, _, err = rg.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
+	require.Nil(t, err)
+}
