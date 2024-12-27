@@ -43,7 +43,7 @@ func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.R
 				// Other clients may be adding/deleting items from the collection while
 				// this code is paging; some items may be skipped or returned multiple times.
 				for _, groupList := range page.Value {
-					gr, err := groupListResource(ctx, groupList, &v2.ResourceId{
+					gr, err := resourceGroupResource(ctx, groupList, &v2.ResourceId{
 						ResourceType: subscriptionsResourceType.Id,
 						Resource:     StringValue(subscription.SubscriptionID),
 					})

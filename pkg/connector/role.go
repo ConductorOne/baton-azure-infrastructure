@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -19,30 +20,43 @@ func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 
 func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
-	// Initialize the RoleDefinitionsClient
-	client, err := armauthorization.NewRoleDefinitionsClient(r.cn.token, nil)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	// Define the scope (use "/" for subscription-level roles)
-	scope := "/subscriptions/39ea64c5-86d5-4c29-8199-5b602c90e1c5"
-	// Get the list of role definitions
-	pager := client.NewListPager(scope, nil)
-	for pager.More() {
-		resp, err := pager.NextPage(ctx)
+	pagerSubscription := r.cn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
+	for pagerSubscription.More() {
+		page, err := pagerSubscription.NextPage(ctx)
 		if err != nil {
 			return nil, "", nil, err
 		}
 
-		// Iterate over role definitions
-		for _, role := range resp.Value {
-			sr, err := roleResource(ctx, role)
+		for _, subscription := range page.Value {
+			// Initialize the RoleDefinitionsClient
+			client, err := armauthorization.NewRoleDefinitionsClient(r.cn.token, nil)
 			if err != nil {
 				return nil, "", nil, err
 			}
 
-			rv = append(rv, sr)
+			// Define the scope (use "/" for subscription-level roles)
+			scope := fmt.Sprintf("/subscriptions/%s", *subscription.SubscriptionID)
+			// Get the list of role definitions
+			pager := client.NewListPager(scope, nil)
+			for pager.More() {
+				resp, err := pager.NextPage(ctx)
+				if err != nil {
+					return nil, "", nil, err
+				}
+
+				// Iterate over role definitions
+				for _, role := range resp.Value {
+					sr, err := roleResource(ctx, role, &v2.ResourceId{
+						ResourceType: subscriptionsResourceType.Id,
+						Resource:     StringValue(subscription.SubscriptionID),
+					})
+					if err != nil {
+						return nil, "", nil, err
+					}
+
+					rv = append(rv, sr)
+				}
+			}
 		}
 	}
 

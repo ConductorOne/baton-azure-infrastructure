@@ -418,7 +418,7 @@ func tenantResource(ctx context.Context, t *armsubscription.TenantIDDescription)
 }
 
 // https://learn.microsoft.com/es-es/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
-func groupListResource(ctx context.Context, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func resourceGroupResource(ctx context.Context, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var opts []rs.ResourceOption
 	profile := map[string]interface{}{
 		"id":       StringValue(rg.ID),
@@ -465,8 +465,11 @@ func BoolValue(v *bool) bool {
 	return false
 }
 
-func roleResource(ctx context.Context, role *armauthorization.RoleDefinition) (*v2.Resource, error) {
-	var strRoleID string
+func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+	var (
+		strRoleID string
+		opts      []rs.ResourceOption
+	)
 	if strings.Contains(StringValue(role.ID), "/") {
 		arr := strings.Split(StringValue(role.ID), "/")
 		if len(arr) > 0 {
@@ -484,11 +487,13 @@ func roleResource(ctx context.Context, role *armauthorization.RoleDefinition) (*
 		rs.WithRoleProfile(profile),
 	}
 
+	opts = append(opts, rs.WithRoleTrait(roleTraitOptions...), rs.WithParentResourceID(parentResourceID))
 	resource, err := rs.NewRoleResource(
 		StringValue(role.Properties.RoleName),
 		roleResourceType,
 		strRoleID,
 		roleTraitOptions,
+		opts...,
 	)
 	if err != nil {
 		return nil, err
