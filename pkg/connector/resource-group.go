@@ -4,7 +4,6 @@ import (
 	"context"
 
 	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
-	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -20,12 +19,7 @@ func (rg *resourceGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceTy
 
 func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
-	clientFactory, err := armsubscription.NewClientFactory(rg.cn.token, nil)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	pagerSubscriptions := clientFactory.NewSubscriptionsClient().NewListPager(nil)
+	pagerSubscriptions := rg.cn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
 	for pagerSubscriptions.More() {
 		page, err := pagerSubscriptions.NextPage(ctx)
 		if err != nil {
@@ -45,7 +39,7 @@ func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.R
 				}
 
 				// NOTE: The service desides how many items to return on a page.
-				// If a page has 0 items, go get the next page.
+				// If a page has 0 items, then, get the next page.
 				// Other clients may be adding/deleting items from the collection while
 				// this code is paging; some items may be skipped or returned multiple times.
 				for _, groupList := range page.Value {

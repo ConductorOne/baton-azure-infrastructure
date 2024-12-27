@@ -7,6 +7,7 @@ import (
 
 	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
@@ -19,6 +20,7 @@ type Connector struct {
 	httpClient      *uhttp.BaseHttpClient
 	MailboxSettings bool
 	SkipAdGroups    bool
+	clientFactory   *armsubscription.ClientFactory
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
@@ -58,11 +60,17 @@ func NewConnectorFromToken(ctx context.Context, httpClient *http.Client, token a
 		return nil, err
 	}
 
+	clientFactory, err := armsubscription.NewClientFactory(token, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Connector{
 		token:           token,
 		httpClient:      client,
 		MailboxSettings: mailboxSettings,
 		SkipAdGroups:    skipAdGroups,
+		clientFactory:   clientFactory,
 	}, nil
 }
 

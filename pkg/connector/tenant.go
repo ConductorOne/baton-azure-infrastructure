@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 
-	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -19,12 +18,7 @@ func (t *tenantBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 
 func (t *tenantBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
-	clientFactory, err := armsubscription.NewClientFactory(t.cn.token, nil)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	pager := clientFactory.NewTenantsClient().NewListPager(nil)
+	pager := t.cn.clientFactory.NewTenantsClient().NewListPager(nil)
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
