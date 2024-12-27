@@ -34,17 +34,25 @@ var (
 
 	subscriptionsResourceType = &v2.ResourceType{
 		Id:          "subscription",
-		DisplayName: "Subscription",
+		DisplayName: "Subscription of Azure Infrastructure",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_APP},
 	}
 
 	tenantResourceType = &v2.ResourceType{
 		Id:          "tenant",
-		DisplayName: "Tenant",
+		DisplayName: "Tenant of Azure Infrastructure",
 	}
 
 	resourceGroupResourceType = &v2.ResourceType{
 		Id:          "resource-group",
-		DisplayName: "Resource Group",
+		DisplayName: "Resource Group of Azure Infrastructure",
+		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP},
+	}
+
+	roleResourceType = &v2.ResourceType{
+		Id:          "role",
+		DisplayName: "Role",
+		Description: "Role of Azure Infrastructure",
+		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE},
 	}
 )

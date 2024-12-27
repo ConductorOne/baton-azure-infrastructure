@@ -105,3 +105,18 @@ func TestResourceGroupBuilderList(t *testing.T) {
 	_, _, _, err = rg.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
 }
+
+func TestRoleBuilderList(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	r := &roleBuilder{
+		cn: &connTest,
+	}
+	_, _, _, err = r.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
+	require.Nil(t, err)
+}

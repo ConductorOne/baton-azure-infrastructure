@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
@@ -426,11 +427,11 @@ func groupListResource(ctx context.Context, rg *armresources.ResourceGroup, pare
 		"location": StringValue(rg.Location),
 	}
 
-	groupListTraitOptions := []rs.AppTraitOption{
-		rs.WithAppProfile(profile),
+	groupListTraitOptions := []rs.GroupTraitOption{
+		rs.WithGroupProfile(profile),
 	}
 
-	opts = append(opts, rs.WithAppTrait(groupListTraitOptions...), rs.WithParentResourceID(parentResourceID))
+	opts = append(opts, rs.WithGroupTrait(groupListTraitOptions...), rs.WithParentResourceID(parentResourceID))
 	resource, err := rs.NewResource(
 		StringValue(rg.Name),
 		resourceGroupResourceType,
@@ -462,4 +463,36 @@ func BoolValue(v *bool) bool {
 	}
 
 	return false
+}
+
+func roleResource(ctx context.Context, role *armauthorization.RoleDefinition) (*v2.Resource, error) {
+	var strRoleID string
+	if strings.Contains(StringValue(role.ID), "/") {
+		arr := strings.Split(StringValue(role.ID), "/")
+		if len(arr) > 0 {
+			strRoleID = arr[len(arr)-1]
+		}
+	}
+
+	profile := map[string]interface{}{
+		"id":          strRoleID,
+		"name":        StringValue(role.Properties.RoleName),
+		"description": StringValue(role.Properties.Description),
+		"type":        StringValue(role.Properties.RoleType),
+	}
+	roleTraitOptions := []rs.RoleTraitOption{
+		rs.WithRoleProfile(profile),
+	}
+
+	resource, err := rs.NewRoleResource(
+		StringValue(role.Properties.RoleName),
+		roleResourceType,
+		strRoleID,
+		roleTraitOptions,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return resource, nil
 }
