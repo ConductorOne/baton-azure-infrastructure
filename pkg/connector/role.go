@@ -8,6 +8,7 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 )
 
 type roleBuilder struct {
@@ -46,7 +47,7 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 
 				// Iterate over role definitions
 				for _, role := range resp.Value {
-					sr, err := roleResource(ctx, role, &v2.ResourceId{
+					rs, err := roleResource(ctx, role, &v2.ResourceId{
 						ResourceType: subscriptionsResourceType.Id,
 						Resource:     StringValue(subscription.SubscriptionID),
 					})
@@ -54,7 +55,7 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 						return nil, "", nil, err
 					}
 
-					rv = append(rv, sr)
+					rv = append(rv, rs)
 				}
 			}
 		}
@@ -64,7 +65,22 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 }
 
 func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+	var rv []*v2.Entitlement
+	options := []ent.EntitlementOption{
+		ent.WithDisplayName(fmt.Sprintf("%s Role Owner", resource.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("Owner of %s role", resource.DisplayName)),
+		ent.WithGrantableTo(userResourceType),
+	}
+	rv = append(rv, ent.NewPermissionEntitlement(resource, typeOwners, options...))
+
+	options = []ent.EntitlementOption{
+		ent.WithDisplayName(fmt.Sprintf("%s Role Member", resource.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("Member of %s role", resource.DisplayName)),
+		ent.WithGrantableTo(userResourceType, groupResourceType),
+	}
+	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeMembers, options...))
+
+	return rv, "", nil, nil
 }
 
 func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
