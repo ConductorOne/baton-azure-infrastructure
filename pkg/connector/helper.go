@@ -467,21 +467,22 @@ func BoolValue(v *bool) bool {
 
 func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var (
-		strRoleID string
+		strRoleID = StringValue(role.ID)
 		opts      []rs.ResourceOption
 	)
 	if strings.Contains(StringValue(role.ID), "/") {
 		arr := strings.Split(StringValue(role.ID), "/")
 		if len(arr) > 0 {
-			strRoleID = arr[len(arr)-1]
+			strRoleID = arr[2] + ":" + arr[len(arr)-1]
 		}
 	}
 
 	profile := map[string]interface{}{
-		"id":          strRoleID,
-		"name":        StringValue(role.Properties.RoleName),
-		"description": StringValue(role.Properties.Description),
-		"type":        StringValue(role.Properties.RoleType),
+		"id":                 strRoleID,
+		"name":               StringValue(role.Properties.RoleName),
+		"description":        StringValue(role.Properties.Description),
+		"type":               StringValue(role.Properties.RoleType),
+		"role-definition-id": StringValue(role.ID),
 	}
 	roleTraitOptions := []rs.RoleTraitOption{
 		rs.WithRoleProfile(profile),
