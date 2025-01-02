@@ -101,9 +101,14 @@ func (s *subscriptionBuilder) Grants(ctx context.Context, resource *v2.Resource,
 					ResourceType: resourceGroupResourceType.Id,
 					Resource:     *assignment.Properties.PrincipalID,
 				}
-			case "#microsoft.graph.servicePrincipal":
+			case "Application":
 				principalId = &v2.ResourceId{
-					ResourceType: servicePrincipalResourceType.Id,
+					ResourceType: enterpriseApplicationResourceType.Id,
+					Resource:     *assignment.Properties.PrincipalID,
+				}
+			case "ManagedIdentity":
+				principalId = &v2.ResourceId{
+					ResourceType: managedIdentitylResourceType.Id,
 					Resource:     *assignment.Properties.PrincipalID,
 				}
 			}

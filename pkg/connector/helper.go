@@ -65,7 +65,7 @@ func userResource(ctx context.Context, u *user, parentResourceID *v2.ResourceId,
 	}
 
 	options = append(options, userTraitOptions...)
-	if u.UserPrincipalName != "" {
+	if !IsEmpty(u.UserPrincipalName) {
 		options = append(options, rs.WithUserLogin(u.UserPrincipalName))
 	}
 
@@ -126,7 +126,7 @@ func fetchEmailAddresses(email string, upn string) string {
 		upnEmail = addr.Address
 	}
 
-	if primaryEmail == "" && upnEmail != "" {
+	if IsEmpty(primaryEmail) && !IsEmpty(upnEmail) {
 		primaryEmail = upnEmail
 	}
 
@@ -341,7 +341,6 @@ func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Reso
 			return nil, nil
 		}
 		ur := &v2.Resource{Id: rid}
-
 		return &v2.Grant{
 			Id: fmtResourceGrant(resource.Id, ur.Id, objectID+":"+ps.ResourceTypeID),
 			Entitlement: &v2.Entitlement{
@@ -511,9 +510,9 @@ func getRoleId(roleID *string) string {
 
 func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (string, error) {
 	var (
-		index         = 0
 		principalData map[string]interface{}
 		mapEndPoint   = []string{"directoryObjects", "users", "groups", "servicePrincipals"}
+		index         = 0
 	)
 	for index < len(mapEndPoint) {
 		reqURL := cn.buildURL(fmt.Sprintf("%s/%s", mapEndPoint[index], principalID), nil)
@@ -524,7 +523,15 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 		}
 
 		if principalType, ok := principalData["@odata.type"].(string); ok {
-			return principalType, nil
+			switch principalType {
+			// Service Principal can be an Enterprise Application or Managed Identity.
+			case "#microsoft.graph.servicePrincipal":
+				if servicePrincipalType, ok := principalData["servicePrincipalType"].(string); ok {
+					return servicePrincipalType, nil
+				}
+			default:
+				return principalType, nil
+			}
 		}
 
 		index++
@@ -542,7 +549,7 @@ func managedIdentityResource(ctx context.Context, sp *servicePrincipal, parentRe
 		rs.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_SERVICE),
 	}
 
-	if sp.Info.LogoUrl != "" {
+	if !IsEmpty(sp.Info.LogoUrl) {
 		options = append(options, rs.WithUserIcon(&v2.AssetRef{
 			Id: sp.Info.LogoUrl,
 		}))
@@ -591,7 +598,6 @@ func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, p
 	profile := make(map[string]interface{})
 	profile["id"] = app.ID
 	profile["app_id"] = app.AppId
-
 	if expSlices.Contains(app.Tags, "WindowsAzureActiveDirectoryIntegratedApp") {
 		profile["is_integrated"] = true
 	}
@@ -603,13 +609,13 @@ func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, p
 	options := []rs.AppTraitOption{
 		rs.WithAppProfile(profile),
 	}
-
-	if app.Info.LogoUrl != "" {
+	if !IsEmpty(app.Info.LogoUrl) {
 		options = append(options, rs.WithAppLogo(&v2.AssetRef{
 			Id: app.Info.LogoUrl,
 		}))
 	}
-	if app.Homepage != "" {
+
+	if !IsEmpty(app.Homepage) {
 		options = append(options, rs.WithAppHelpURL(app.Homepage))
 	}
 

@@ -55,10 +55,4 @@ var (
 		Description: "Role of Azure Infrastructure",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE},
 	}
-
-	servicePrincipalResourceType = &v2.ResourceType{
-		Id:          "service-principal",
-		DisplayName: "Service Principal of Azure Infrastructure",
-		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_APP},
-	}
 )
