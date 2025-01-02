@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -13,6 +14,11 @@ import (
 	uuid "github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	zap "go.uber.org/zap"
+)
+
+const (
+	resGroupId = "test_resource_group"
+	subsID     = "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
 )
 
 type roleBuilder struct {
@@ -110,7 +116,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 
 	subscriptionId := roleIDs[0]
 	roleId := roleIDs[1]
-	resourceGroupId := "test_resource_group"
+	resourceGroupId := resGroupId
 	principalID := principal.Id.Resource // Object ID of the user, group, or service principal
 	// Initialize the client
 	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.cn.token, nil)
@@ -152,6 +158,38 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 }
 
 func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+	principal := grant.Principal
+	if principal.Id.ResourceType != userResourceType.Id {
+		l.Warn(
+			"azure-infrastructure-connector: only users can have role membership revoked",
+			zap.String("principal_type", principal.Id.ResourceType),
+			zap.String("principal_id", principal.Id.Resource),
+		)
+		return nil, fmt.Errorf("azure-infrastructure-connector: only users can have role membership revoked")
+	}
+
+	// Replace with your subscription ID and role assignment ID
+	subscriptionID := subsID
+	roleID := "0105a6b0-4bb9-43d2-982a-12806f9faddb" // Full resource ID of the role assignment to delete
+	resourceGroupId := "test_resource_group"
+	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, resourceGroupId)
+	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionID, roleID)
+	roleAssignmentID := roleDefinitionID
+	// Create a RoleAssignmentsClient
+	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.cn.token, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Delete the role assignment
+	_, err = client.Delete(ctx, scope, roleAssignmentID, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("Role assignment %s successfully revoked\n", roleAssignmentID)
+
 	return nil, nil
 }
 

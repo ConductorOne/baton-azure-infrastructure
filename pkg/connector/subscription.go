@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -65,12 +64,15 @@ func (s *subscriptionBuilder) Entitlements(_ context.Context, resource *v2.Resou
 
 func (s *subscriptionBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	var (
-		rv        []*v2.Grant
-		gr        *v2.Grant
-		strRoleID string
+		rv          []*v2.Grant
+		gr          *v2.Grant
+		roleID      string
+		principalId *v2.ResourceId
+		isUserType  = true
 	)
+	subscriptionID := resource.Id.Resource
 	// Create a new RoleAssignmentsClient
-	client, err := armauthorization.NewRoleAssignmentsClient(resource.Id.Resource, s.cn.token, nil)
+	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, s.cn.token, nil)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -84,27 +86,38 @@ func (s *subscriptionBuilder) Grants(ctx context.Context, resource *v2.Resource,
 		}
 
 		for _, assignment := range page.Value {
-			userId := &v2.ResourceId{
-				ResourceType: userResourceType.Id,
-				Resource:     *assignment.Properties.PrincipalID,
+			isResourceGroupType, err := isResourceGroup(s.cn.token, subscriptionID, *assignment.Properties.PrincipalID)
+			if err != nil {
+				return nil, "", nil, err
 			}
-			if strings.Contains(StringValue(assignment.Properties.RoleDefinitionID), "/") {
-				arr := strings.Split(StringValue(assignment.Properties.RoleDefinitionID), "/")
-				if len(arr) > 0 {
-					strRoleID = arr[len(arr)-1]
+
+			if isResourceGroupType {
+				principalId = &v2.ResourceId{
+					ResourceType: resourceGroupResourceType.Id,
+					Resource:     *assignment.Properties.PrincipalID,
+				}
+				isUserType = false
+			}
+
+			if isUserType {
+				principalId = &v2.ResourceId{
+					ResourceType: userResourceType.Id,
+					Resource:     *assignment.Properties.PrincipalID,
 				}
 			}
 
+			roleDefinitionID := assignment.Properties.RoleDefinitionID
+			roleID = getRoleId(roleDefinitionID)
 			roleRes, err := rs.NewResource(
 				*assignment.Name,
 				roleResourceType,
-				strRoleID,
+				roleID,
 			)
 			if err != nil {
 				return nil, "", nil, err
 			}
 
-			gr = grant.NewGrant(roleRes, typeMembers, userId)
+			gr = grant.NewGrant(roleRes, typeMembers, principalId)
 			rv = append(rv, gr)
 		}
 	}
@@ -113,5 +126,7 @@ func (s *subscriptionBuilder) Grants(ctx context.Context, resource *v2.Resource,
 }
 
 func newSubscriptionBuilder(conn *Connector) *subscriptionBuilder {
-	return &subscriptionBuilder{cn: conn}
+	return &subscriptionBuilder{
+		cn: conn,
+	}
 }

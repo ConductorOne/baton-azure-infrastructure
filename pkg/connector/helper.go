@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 
+	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
@@ -467,16 +468,10 @@ func BoolValue(v *bool) bool {
 
 func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var (
-		strRoleID = StringValue(role.ID)
+		strRoleID string
 		opts      []rs.ResourceOption
 	)
-	if strings.Contains(StringValue(role.ID), "/") {
-		arr := strings.Split(StringValue(role.ID), "/")
-		if len(arr) > 0 {
-			strRoleID = arr[2] + ":" + arr[len(arr)-1]
-		}
-	}
-
+	strRoleID = getRoleId(role.ID)
 	profile := map[string]interface{}{
 		"id":                 strRoleID,
 		"name":               StringValue(role.Properties.RoleName),
@@ -501,4 +496,43 @@ func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, pa
 	}
 
 	return resource, nil
+}
+
+func getRoleId(roleID *string) string {
+	if strings.Contains(StringValue(roleID), "/") {
+		arr := strings.Split(StringValue(roleID), "/")
+		if len(arr) > 0 {
+			return arr[2] + ":" + arr[len(arr)-1]
+		}
+	}
+
+	return ""
+}
+
+func isResourceGroup(token azcore.TokenCredential, subscriptionID, principalID string) (bool, error) {
+	// Create a Resource client
+	clientFactory, err := armresources.NewClientFactory(subscriptionID, token, nil)
+	if err != nil {
+		return false, err
+	}
+
+	resourceClient := clientFactory.NewResourceGroupsClient()
+	// List resources and search for the matching Principal ID
+	pager := resourceClient.NewListPager(nil)
+	ctx := context.Background()
+
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return false, err
+		}
+
+		for _, resource := range page.Value {
+			if strings.Contains(*resource.ID, principalID) {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
 }

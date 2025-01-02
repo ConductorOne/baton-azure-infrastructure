@@ -3,14 +3,18 @@ package connector
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
+	grant "github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/stretchr/testify/require"
 )
@@ -231,4 +235,104 @@ func getEntitlementForTesting(resource *v2.Resource, resourceDisplayName, entitl
 	}
 
 	return ent.NewAssignmentEntitlement(resource, entitlement, options...)
+}
+
+func TestRoleRevoke(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	// --revoke-grant project:10000:Administrators:user:JIRAUSER10103
+	revokeGrant := "role:39ea64c5-86d5-4c29-8199-5b602c90e1c5:0105a6b0-4bb9-43d2-982a-12806f9faddb:members:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+	data := strings.Split(revokeGrant, ":")
+	principalID := &v2.ResourceId{ResourceType: userResourceType.Id, Resource: "4603be3e-9014-4bb4-9bc0-27a1a77b8e82"}
+	resource, err := getRoleForTesting(ctxTest, data[1], data[2], "local_role", "testing role")
+	require.Nil(t, err)
+
+	gr := grant.NewGrant(resource, "members", principalID)
+	annos := annotations.Annotations(gr.Annotations)
+	gr.Annotations = annos
+	require.NotNil(t, gr)
+
+	// --revoke-grant "role:39ea64c5-86d5-4c29-8199-5b602c90e1c5:0105a6b0-4bb9-43d2-982a-12806f9faddb:members:user:4603be3e-9014-4bb4-9bc0-27a1a77b8e82"
+	l := &roleBuilder{
+		cn: &connTest,
+	}
+	_, err = l.Revoke(ctxTest, gr)
+	require.Nil(t, err)
+}
+
+func TestB2(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	subscriptionID := "39ea64c5-86d5-4c29-8199-5b602c90e1c5" // Replace with your subscription ID
+	principalID := "test_resource_group"                     // Replace with the Principal ID you're searching for
+
+	// Create a Resource client
+	clientFactory, err := armresources.NewClientFactory(subscriptionID, connTest.token, nil)
+	require.Nil(t, err)
+
+	resourceClient := clientFactory.NewResourceGroupsClient()
+	// resourceClient := clientFactory.NewResourcesClient()
+
+	// List resources and search for the matching Principal ID
+	pager := resourceClient.NewListPager(nil)
+	ctx := context.Background()
+
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		require.Nil(t, err)
+
+		for _, resource := range page.Value {
+			if strings.Contains(*resource.ID, principalID) {
+				log.Println("ok")
+			}
+		}
+	}
+}
+
+func TestListingResourceGroupContent(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	// Define variables
+	resourceGroupName := "test_2_resource_group"
+	subscriptionID := "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
+
+	// Authenticate with Azure
+	// cred, err := azidentity.NewDefaultAzureCredential(nil)
+	// if err != nil {
+	// 	log.Fatalf("Failed to get credentials: %v", err)
+	// }
+
+	// Create a Resources client
+	client, err := armresources.NewClient(subscriptionID, connTest.token, nil)
+	require.Nil(t, err)
+
+	// List resources in the resource group
+	pager := client.NewListByResourceGroupPager(resourceGroupName, nil)
+	log.Printf("Resources in resource group %s:\n", resourceGroupName)
+
+	// Iterate through the pages of results
+	for pager.More() {
+		page, err := pager.NextPage(ctxTest)
+		if err != nil {
+			log.Fatalf("Failed to get next page: %v", err)
+		}
+		for _, resource := range page.Value {
+			log.Printf("- Name: %s, Type: %s\n", *resource.Name, *resource.Type)
+		}
+	}
 }
