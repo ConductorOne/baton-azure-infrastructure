@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -22,7 +21,7 @@ const (
 )
 
 type roleBuilder struct {
-	cn *Connector
+	conn *Connector
 }
 
 func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -31,7 +30,7 @@ func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 
 func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
-	pagerSubscription := r.cn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
+	pagerSubscription := r.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
 	for pagerSubscription.More() {
 		page, err := pagerSubscription.NextPage(ctx)
 		if err != nil {
@@ -40,7 +39,7 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 
 		for _, subscription := range page.Value {
 			// Initialize the RoleDefinitionsClient
-			client, err := armauthorization.NewRoleDefinitionsClient(r.cn.token, nil)
+			client, err := armauthorization.NewRoleDefinitionsClient(r.conn.token, nil)
 			if err != nil {
 				return nil, "", nil, err
 			}
@@ -119,7 +118,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	resourceGroupId := resGroupId
 	principalID := principal.Id.Resource // Object ID of the user, group, or service principal
 	// Initialize the client
-	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.cn.token, nil)
+	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -170,14 +169,12 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	}
 
 	// Replace with your subscription ID and role assignment ID
-	subscriptionID := subsID
 	roleID := "0105a6b0-4bb9-43d2-982a-12806f9faddb" // Full resource ID of the role assignment to delete
-	resourceGroupId := "test_resource_group"
-	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, resourceGroupId)
-	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionID, roleID)
+	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subsID, resGroupId)
+	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subsID, roleID)
 	roleAssignmentID := roleDefinitionID
 	// Create a RoleAssignmentsClient
-	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.cn.token, nil)
+	client, err := armauthorization.NewRoleAssignmentsClient(subsID, r.conn.token, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -188,11 +185,15 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 		return nil, err
 	}
 
-	log.Printf("Role assignment %s successfully revoked\n", roleAssignmentID)
+	l.Warn("Role assignment successfully revoked.",
+		zap.String("roleAssignmentID", roleAssignmentID),
+	)
 
 	return nil, nil
 }
 
-func newRoleBuilder(conn *Connector) *roleBuilder {
-	return &roleBuilder{cn: conn}
+func newRoleBuilder(c *Connector) *roleBuilder {
+	return &roleBuilder{
+		conn: c,
+	}
 }

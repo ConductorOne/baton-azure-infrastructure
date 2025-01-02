@@ -35,7 +35,7 @@ func TestUserBuilderList(t *testing.T) {
 	require.Nil(t, err)
 
 	u := &userBuilder{
-		cn: &connTest,
+		conn: &connTest,
 	}
 	res, _, _, err := u.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
@@ -51,7 +51,7 @@ func TestGroupBuilderList(t *testing.T) {
 	require.Nil(t, err)
 
 	u := &groupBuilder{
-		cn: &connTest,
+		conn: &connTest,
 	}
 	res, _, _, err := u.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
@@ -79,7 +79,7 @@ func TestSubscriptionBuilderList(t *testing.T) {
 	require.Nil(t, err)
 
 	s := &subscriptionBuilder{
-		cn: &connTest,
+		conn: &connTest,
 	}
 	_, _, _, err = s.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
@@ -94,7 +94,7 @@ func TestTenantBuilderList(t *testing.T) {
 	require.Nil(t, err)
 
 	tn := &tenantBuilder{
-		cn: &connTest,
+		conn: &connTest,
 	}
 	_, _, _, err = tn.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
@@ -109,7 +109,7 @@ func TestResourceGroupBuilderList(t *testing.T) {
 	require.Nil(t, err)
 
 	rg := &resourceGroupBuilder{
-		cn: &connTest,
+		conn: &connTest,
 	}
 	_, _, _, err = rg.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
@@ -124,7 +124,7 @@ func TestRoleBuilderList(t *testing.T) {
 	require.Nil(t, err)
 
 	r := &roleBuilder{
-		cn: &connTest,
+		conn: &connTest,
 	}
 	_, _, _, err = r.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
@@ -139,7 +139,7 @@ func TestRoleGrants(t *testing.T) {
 	require.Nil(t, err)
 
 	r := &roleBuilder{
-		cn: &connTest,
+		conn: &connTest,
 	}
 	_, _, _, err = r.Grants(ctxTest, &v2.Resource{}, &pagination.Token{})
 	require.Nil(t, err)
@@ -154,7 +154,7 @@ func TestSubscriptionGrants(t *testing.T) {
 	require.Nil(t, err)
 
 	s := &subscriptionBuilder{
-		cn: &connTest,
+		conn: &connTest,
 	}
 	res, err := rs.NewResource(
 		"Azure subscription 1",
@@ -189,7 +189,7 @@ func TestRoleGrant(t *testing.T) {
 
 	entitlement := getEntitlementForTesting(resource, grantPrincipalType, roleEntitlement)
 	g := &roleBuilder{
-		cn: &connTest,
+		conn: &connTest,
 	}
 	_, err = g.Grant(ctxTest, &v2.Resource{
 		Id: &v2.ResourceId{
@@ -259,7 +259,7 @@ func TestRoleRevoke(t *testing.T) {
 
 	// --revoke-grant "role:39ea64c5-86d5-4c29-8199-5b602c90e1c5:0105a6b0-4bb9-43d2-982a-12806f9faddb:members:user:4603be3e-9014-4bb4-9bc0-27a1a77b8e82"
 	l := &roleBuilder{
-		cn: &connTest,
+		conn: &connTest,
 	}
 	_, err = l.Revoke(ctxTest, gr)
 	require.Nil(t, err)
@@ -335,4 +335,18 @@ func TestListingResourceGroupContent(t *testing.T) {
 			log.Printf("- Name: %s, Type: %s\n", *resource.Name, *resource.Type)
 		}
 	}
+}
+
+func TestGetPrincipalType(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	// Authenticate with Microsoft Graph
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	principalID := "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+	_, err = getPrincipalType(ctxTest, &connTest, principalID)
+	require.Nil(t, err)
 }

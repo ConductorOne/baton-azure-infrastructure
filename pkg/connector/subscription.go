@@ -14,7 +14,7 @@ import (
 )
 
 type subscriptionBuilder struct {
-	cn *Connector
+	conn *Connector
 }
 
 func (s *subscriptionBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -23,7 +23,7 @@ func (s *subscriptionBuilder) ResourceType(ctx context.Context) *v2.ResourceType
 
 func (s *subscriptionBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
-	pager := s.cn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
+	pager := s.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
@@ -64,15 +64,14 @@ func (s *subscriptionBuilder) Entitlements(_ context.Context, resource *v2.Resou
 
 func (s *subscriptionBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	var (
-		rv          []*v2.Grant
-		gr          *v2.Grant
-		roleID      string
-		principalId *v2.ResourceId
-		isUserType  = true
+		rv             []*v2.Grant
+		gr             *v2.Grant
+		roleID         string
+		principalId    *v2.ResourceId
+		subscriptionID = resource.Id.Resource
 	)
-	subscriptionID := resource.Id.Resource
 	// Create a new RoleAssignmentsClient
-	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, s.cn.token, nil)
+	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, s.conn.token, nil)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -86,22 +85,25 @@ func (s *subscriptionBuilder) Grants(ctx context.Context, resource *v2.Resource,
 		}
 
 		for _, assignment := range page.Value {
-			isResourceGroupType, err := isResourceGroup(s.cn.token, subscriptionID, *assignment.Properties.PrincipalID)
+			principalType, err := getPrincipalType(ctx, s.conn, *assignment.Properties.PrincipalID)
 			if err != nil {
-				return nil, "", nil, err
+				continue
 			}
 
-			if isResourceGroupType {
+			switch principalType {
+			case "#microsoft.graph.user":
+				principalId = &v2.ResourceId{
+					ResourceType: userResourceType.Id,
+					Resource:     *assignment.Properties.PrincipalID,
+				}
+			case "#microsoft.graph.group":
 				principalId = &v2.ResourceId{
 					ResourceType: resourceGroupResourceType.Id,
 					Resource:     *assignment.Properties.PrincipalID,
 				}
-				isUserType = false
-			}
-
-			if isUserType {
+			case "#microsoft.graph.servicePrincipal":
 				principalId = &v2.ResourceId{
-					ResourceType: userResourceType.Id,
+					ResourceType: servicePrincipalResourceType.Id,
 					Resource:     *assignment.Properties.PrincipalID,
 				}
 			}
@@ -127,6 +129,6 @@ func (s *subscriptionBuilder) Grants(ctx context.Context, resource *v2.Resource,
 
 func newSubscriptionBuilder(conn *Connector) *subscriptionBuilder {
 	return &subscriptionBuilder{
-		cn: conn,
+		conn: conn,
 	}
 }

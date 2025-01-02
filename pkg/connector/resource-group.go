@@ -10,7 +10,7 @@ import (
 )
 
 type resourceGroupBuilder struct {
-	cn *Connector
+	conn *Connector
 }
 
 func (rg *resourceGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -19,7 +19,7 @@ func (rg *resourceGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceTy
 
 func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
-	pagerSubscriptions := rg.cn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
+	pagerSubscriptions := rg.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
 	for pagerSubscriptions.More() {
 		page, err := pagerSubscriptions.NextPage(ctx)
 		if err != nil {
@@ -27,7 +27,7 @@ func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.R
 		}
 
 		for _, subscription := range page.Value {
-			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, rg.cn.token, nil)
+			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, rg.conn.token, nil)
 			if err != nil {
 				return nil, "", nil, err
 			}
@@ -68,6 +68,8 @@ func (rg *resourceGroupBuilder) Grants(ctx context.Context, resource *v2.Resourc
 	return nil, "", nil, nil
 }
 
-func newResourceGroupBuilder(conn *Connector) *resourceGroupBuilder {
-	return &resourceGroupBuilder{cn: conn}
+func newResourceGroupBuilder(c *Connector) *resourceGroupBuilder {
+	return &resourceGroupBuilder{
+		conn: c,
+	}
 }

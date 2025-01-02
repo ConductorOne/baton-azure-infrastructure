@@ -71,3 +71,55 @@ type membership struct {
 type assignment struct {
 	ObjectRef string `json:"@odata.id"`
 }
+
+type servicePrincipal struct {
+	AccountEnabled         bool       `json:"accountEnabled,omitempty"`
+	AppDisplayName         string     `json:"appDisplayName,omitempty"`
+	AppId                  string     `json:"appId,omitempty"`
+	AppOwnerOrganizationId string     `json:"appOwnerOrganizationId,omitempty"`
+	Description            string     `json:"description,omitempty"`
+	DisplayName            string     `json:"displayName,omitempty"`
+	Homepage               string     `json:"homepage,omitempty"`
+	ID                     string     `json:"id,omitempty"`
+	Info                   info       `json:"info"`
+	ServicePrincipalType   string     `json:"servicePrincipalType,omitempty"`
+	Tags                   []string   `json:"tags,omitempty"`
+	AppRoles               []*appRole `json:"appRoles,omitempty"`
+}
+
+type info struct {
+	LogoUrl string `json:"logoUrl"`
+}
+
+type appRole struct {
+	AllowedMemberTypes []string `json:"allowedMemberTypes,omitempty"` // "User" or "Application"
+	Description        string   `json:"description,omitempty"`
+	DisplayName        string   `json:"displayName,omitempty"`
+	Id                 string   `json:"id,omitempty"`
+	IsEnabled          bool     `json:"isEnabled,omitempty"`
+	Value              string   `json:"value,omitempty"`
+}
+
+type servicePrincipalsList struct {
+	Context  string              `json:"@odata.context"`
+	NextLink string              `json:"@odata.nextLink"`
+	Value    []*servicePrincipal `json:"value,omitempty"`
+}
+
+type appRoleAssignmentList struct {
+	Context  string               `json:"@odata.context"`
+	NextLink string               `json:"@odata.nextLink"`
+	Value    []*appRoleAssignment `json:"value"`
+}
+
+type appRoleAssignment struct {
+	AppRoleId            string `json:"appRoleId"`
+	CreatedDateTime      string `json:"createdDateTime"`
+	DeletedDateTime      string `json:"deletedDateTime"`
+	Id                   string `json:"id"`
+	PrincipalDisplayName string `json:"principalDisplayName"`
+	PrincipalId          string `json:"principalId"`
+	PrincipalType        string `json:"principalType"` // The type of the assigned principal. This can either be User, Group, or ServicePrincipal. Read-only.
+	ResourceDisplayName  string `json:"resourceDisplayName"`
+	ResourceId           string `json:"resourceId"`
+}

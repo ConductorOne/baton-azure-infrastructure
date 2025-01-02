@@ -33,6 +33,7 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newResourceGroupBuilder(d),
 		newRoleBuilder(d),
 		newEnterpriseApplicationsBuilder(d),
+		newManagedIdentityBuilder(d),
 	}
 }
 

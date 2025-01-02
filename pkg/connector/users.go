@@ -16,7 +16,7 @@ import (
 )
 
 type userBuilder struct {
-	cn *Connector
+	conn *Connector
 }
 
 func (usr *userBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -35,11 +35,11 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 
 	reqURL := bag.PageToken()
 	if reqURL == "" {
-		reqURL = usr.cn.buildURL("users", setUserKeys())
+		reqURL = usr.conn.buildURL("users", setUserKeys())
 	}
 
 	resp := &usersList{}
-	err = usr.cn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
+	err = usr.conn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -50,7 +50,7 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 	}
 
 	// If mailboxSettings is disabled, we can return the users without checking mailboxSettings.
-	if !usr.cn.MailboxSettings {
+	if !usr.conn.MailboxSettings {
 		users, err := slices.ConvertErr(resp.Users, func(user *user) (*v2.Resource, error) {
 			return userResource(ctx, user, parentResourceID)
 		})
@@ -63,9 +63,9 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 
 	// GET https://graph.microsoft.com/beta/users/{userId}/mailboxSettings
 	for _, ur := range resp.Users {
-		reqURL = usr.cn.buildURL(path.Join("users", ur.ID, "mailboxSettings"), setUserResponseKeys())
+		reqURL = usr.conn.buildURL(path.Join("users", ur.ID, "mailboxSettings"), setUserResponseKeys())
 		mailboxSettingsResp := &mailboxSettings{}
-		err = usr.cn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, mailboxSettingsResp)
+		err = usr.conn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, mailboxSettingsResp)
 		if err != nil {
 			l.Warn(
 				"baton-azure-infrastructure: error fetching mailboxSettings",
@@ -103,5 +103,7 @@ func (usr *userBuilder) Grants(ctx context.Context, resource *v2.Resource, pToke
 }
 
 func newUserBuilder(conn *Connector) *userBuilder {
-	return &userBuilder{cn: conn}
+	return &userBuilder{
+		conn: conn,
+	}
 }

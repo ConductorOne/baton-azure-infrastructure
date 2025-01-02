@@ -9,25 +9,25 @@ var (
 	// The user resource type is for all user objects from the database.
 	userResourceType = &v2.ResourceType{
 		Id:          "user",
-		DisplayName: "User",
+		DisplayName: "User of Azure Infrastructure",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER},
 	}
 
 	groupResourceType = &v2.ResourceType{
 		Id:          "group",
-		DisplayName: "Group",
+		DisplayName: "Group of Azure Infrastructure",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP},
 	}
 
 	enterpriseApplicationResourceType = &v2.ResourceType{
 		Id:          "enterprise_application",
-		DisplayName: "Enterprise Application",
+		DisplayName: "Enterprise Application of Azure Infrastructure",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_APP},
 	}
 
 	managedIdentitylResourceType = &v2.ResourceType{
 		Id:          "managed_identity",
-		DisplayName: "Managed Identity",
+		DisplayName: "Managed Identity of Azure Infrastructure",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER},
 		Annotations: annotations.New(&v2.SkipEntitlementsAndGrants{}),
 	}
@@ -54,5 +54,11 @@ var (
 		DisplayName: "Role",
 		Description: "Role of Azure Infrastructure",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE},
+	}
+
+	servicePrincipalResourceType = &v2.ResourceType{
+		Id:          "service-principal",
+		DisplayName: "Service Principal of Azure Infrastructure",
+		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_APP},
 	}
 )

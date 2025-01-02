@@ -19,7 +19,7 @@ import (
 )
 
 type groupBuilder struct {
-	cn                         *Connector
+	conn                       *Connector
 	knownGroupMembershipTypes  map[string]bool
 	knownServicePrincipalTypes map[string]bool
 }
@@ -50,16 +50,16 @@ func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 	reqURL := bag.PageToken()
 	if reqURL == "" {
 		v := setGroupKeys()
-		if g.cn.SkipAdGroups {
+		if g.conn.SkipAdGroups {
 			v.Set("$filter", "(onPremisesSyncEnabled ne true)")
 			v.Set("$count", "true") // Required to prevent MS Graph from returning a 400
 		}
 
-		reqURL = g.cn.buildURL("groups", v)
+		reqURL = g.conn.buildURL("groups", v)
 	}
 
 	resp := &groupsList{}
-	err = g.cn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
+	err = g.conn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -120,19 +120,19 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 	if b.Current() == nil {
 		owenrsQuery := url.Values{}
 		owenrsQuery.Set("$select", strings.Join([]string{"id"}, ","))
-		ownersURL := g.cn.buildBetaURL(path.Join("groups", resource.Id.Resource, "owners"), owenrsQuery)
+		ownersURL := g.conn.buildBetaURL(path.Join("groups", resource.Id.Resource, "owners"), owenrsQuery)
 		b.Push(pagination.PageState{
 			ResourceTypeID: typeOwners,
 			Token:          ownersURL,
 		})
 
 		memberQuery := setMemberQuery()
-		if g.cn.SkipAdGroups {
+		if g.conn.SkipAdGroups {
 			memberQuery.Set("$filter", "(onPremisesSyncEnabled ne true)")
 			memberQuery.Set("$count", "true") // Required to prevent MS Graph from returning a 400
 		}
 
-		membersURL := g.cn.buildBetaURL(path.Join("groups", resource.Id.Resource, "members"), memberQuery)
+		membersURL := g.conn.buildBetaURL(path.Join("groups", resource.Id.Resource, "members"), memberQuery)
 		b.Push(pagination.PageState{
 			ResourceTypeID: typeMembers,
 			Token:          membersURL,
@@ -141,7 +141,7 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 
 	ps := b.Current()
 	resp := &membershipList{}
-	err = g.cn.query(ctx, graphReadScopes, http.MethodGet, ps.Token, nil, resp)
+	err = g.conn.query(ctx, graphReadScopes, http.MethodGet, ps.Token, nil, resp)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			ctxzap.Extract(ctx).Warn(
@@ -194,10 +194,10 @@ func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitl
 	switch {
 	case strings.HasSuffix(entitlement.Id, ":owners"):
 		// https://learn.microsoft.com/en-us/graph/api/group-post-owners?view=graph-rest-1.0&tabs=http
-		reqURL = g.cn.buildURL(path.Join("groups", groupID, "owners", "$ref"), url.Values{})
+		reqURL = g.conn.buildURL(path.Join("groups", groupID, "owners", "$ref"), url.Values{})
 	case strings.HasSuffix(entitlement.Id, ":members"):
 		// https://learn.microsoft.com/en-us/graph/api/group-post-members?view=graph-rest-1.0&tabs=http
-		reqURL = g.cn.buildURL(path.Join("groups", groupID, "members", "$ref"), url.Values{})
+		reqURL = g.conn.buildURL(path.Join("groups", groupID, "members", "$ref"), url.Values{})
 	default:
 		return nil, errors.New("baton-azure-infrastructure: only members can provision membership or owners entitlements to a group")
 	}
@@ -211,7 +211,7 @@ func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitl
 		return nil, err
 	}
 
-	err = g.cn.query(ctx, graphReadScopes, http.MethodPost, reqURL, body, nil)
+	err = g.conn.query(ctx, graphReadScopes, http.MethodPost, reqURL, body, nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "added object references already exist") {
 			l.Info("Attempted to grant a group membership that already exists, treating as successful")
@@ -243,15 +243,15 @@ func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 	switch {
 	case strings.HasSuffix(entitlement.Id, ":owners"):
 		// https://learn.microsoft.com/en-us/graph/api/group-post-owners?view=graph-rest-1.0&tabs=http
-		reqURL = g.cn.buildURL(path.Join("groups", groupID, "owners", userID, "$ref"), url.Values{})
+		reqURL = g.conn.buildURL(path.Join("groups", groupID, "owners", userID, "$ref"), url.Values{})
 	case strings.HasSuffix(entitlement.Id, ":members"):
 		// https://learn.microsoft.com/en-us/graph/api/group-delete-members?view=graph-rest-1.0&tabs=http
-		reqURL = g.cn.buildURL(path.Join("groups", groupID, "members", userID, "$ref"), url.Values{})
+		reqURL = g.conn.buildURL(path.Join("groups", groupID, "members", userID, "$ref"), url.Values{})
 	default:
 		return nil, errors.New("baton-azure-infrastructure: only can revoke membership or owners entitlements to a group")
 	}
 
-	err := g.cn.query(ctx, graphReadScopes, http.MethodDelete, reqURL, nil, nil)
+	err := g.conn.query(ctx, graphReadScopes, http.MethodDelete, reqURL, nil, nil)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			l.Info("Group membership to revoke not found; treating as successful because the end state is achieved")
@@ -264,6 +264,8 @@ func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 	return nil, nil
 }
 
-func newGroupBuilder(conn *Connector) *groupBuilder {
-	return &groupBuilder{cn: conn}
+func newGroupBuilder(c *Connector) *groupBuilder {
+	return &groupBuilder{
+		conn: c,
+	}
 }

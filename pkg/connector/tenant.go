@@ -9,7 +9,7 @@ import (
 )
 
 type tenantBuilder struct {
-	cn *Connector
+	conn *Connector
 }
 
 func (t *tenantBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -18,7 +18,7 @@ func (t *tenantBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 
 func (t *tenantBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
-	pager := t.cn.clientFactory.NewTenantsClient().NewListPager(nil)
+	pager := t.conn.clientFactory.NewTenantsClient().NewListPager(nil)
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
@@ -47,5 +47,7 @@ func (t *tenantBuilder) Grants(ctx context.Context, resource *v2.Resource, pToke
 }
 
 func newTenantBuilder(conn *Connector) *tenantBuilder {
-	return &tenantBuilder{cn: conn}
+	return &tenantBuilder{
+		conn: conn,
+	}
 }

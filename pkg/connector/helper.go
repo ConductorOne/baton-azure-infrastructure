@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/mail"
 	"net/url"
 	"path"
 	"strings"
 
-	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
@@ -509,30 +509,127 @@ func getRoleId(roleID *string) string {
 	return ""
 }
 
-func isResourceGroup(token azcore.TokenCredential, subscriptionID, principalID string) (bool, error) {
-	// Create a Resource client
-	clientFactory, err := armresources.NewClientFactory(subscriptionID, token, nil)
-	if err != nil {
-		return false, err
-	}
-
-	resourceClient := clientFactory.NewResourceGroupsClient()
-	// List resources and search for the matching Principal ID
-	pager := resourceClient.NewListPager(nil)
-	ctx := context.Background()
-
-	for pager.More() {
-		page, err := pager.NextPage(ctx)
+func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (string, error) {
+	var (
+		index         = 0
+		principalData map[string]interface{}
+		mapEndPoint   = []string{"directoryObjects", "users", "groups", "servicePrincipals"}
+	)
+	for index < len(mapEndPoint) {
+		reqURL := cn.buildURL(fmt.Sprintf("%s/%s", mapEndPoint[index], principalID), nil)
+		resp := &principalData
+		err := cn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 		if err != nil {
-			return false, err
+			return "", err
 		}
 
-		for _, resource := range page.Value {
-			if strings.Contains(*resource.ID, principalID) {
-				return true, nil
-			}
+		if principalType, ok := principalData["@odata.type"].(string); ok {
+			return principalType, nil
 		}
+
+		index++
 	}
 
-	return false, nil
+	return "", nil
+}
+
+func managedIdentityResource(ctx context.Context, sp *servicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+	profile := make(map[string]interface{})
+	profile["id"] = sp.ID
+	profile["app_id"] = sp.AppId
+	options := []rs.UserTraitOption{
+		rs.WithUserProfile(profile),
+		rs.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_SERVICE),
+	}
+
+	if sp.Info.LogoUrl != "" {
+		options = append(options, rs.WithUserIcon(&v2.AssetRef{
+			Id: sp.Info.LogoUrl,
+		}))
+	}
+
+	if sp.AccountEnabled {
+		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED))
+	} else {
+		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
+	}
+
+	ret, err := rs.NewUserResource(
+		sp.getDisplayName(),
+		managedIdentitylResourceType,
+		sp.ID,
+		options,
+		rs.WithParentResourceID(parentResourceID),
+		rs.WithAnnotation(&v2.ExternalLink{
+			Url: sp.externalURL(),
+		}),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
+func setManagedIdentityKeys() url.Values {
+	v := url.Values{}
+	v.Set("$select", strings.Join(servicePrincipalSelect, ","))
+	v.Set("$filter", "servicePrincipalType eq 'ManagedIdentity'")
+	v.Set("$top", "999")
+	return v
+}
+
+func setEnterpriseApplicationsKeys() url.Values {
+	v := url.Values{}
+	v.Set("$select", strings.Join(servicePrincipalSelect, ","))
+	v.Set("$filter", "servicePrincipalType eq 'Application' AND accountEnabled eq true")
+	v.Set("$top", "999")
+	return v
+}
+
+func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+	profile := make(map[string]interface{})
+	profile["id"] = app.ID
+	profile["app_id"] = app.AppId
+
+	if expSlices.Contains(app.Tags, "WindowsAzureActiveDirectoryIntegratedApp") {
+		profile["is_integrated"] = true
+	}
+
+	if expSlices.Contains(app.Tags, "HideApp") {
+		profile["hidden_app"] = true
+	}
+
+	options := []rs.AppTraitOption{
+		rs.WithAppProfile(profile),
+	}
+
+	if app.Info.LogoUrl != "" {
+		options = append(options, rs.WithAppLogo(&v2.AssetRef{
+			Id: app.Info.LogoUrl,
+		}))
+	}
+	if app.Homepage != "" {
+		options = append(options, rs.WithAppHelpURL(app.Homepage))
+	}
+
+	if app.AppOwnerOrganizationId == microsoftBuiltinAppsOwnerID {
+		options = append(options, rs.WithAppFlags(v2.AppTrait_APP_FLAG_HIDDEN))
+	}
+
+	ret, err := rs.NewAppResource(
+		app.getDisplayName(),
+		enterpriseApplicationResourceType,
+		app.ID,
+		options,
+		rs.WithParentResourceID(parentResourceID),
+		rs.WithAnnotation(&v2.ExternalLink{
+			Url: app.externalURL(),
+		}),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
 }

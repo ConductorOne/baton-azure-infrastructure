@@ -15,14 +15,12 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
-	"github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
-	expSlices "golang.org/x/exp/slices"
 )
 
 type enterpriseApplicationsBuilder struct {
-	cn *Connector
+	conn *Connector
 }
 
 func (e *enterpriseApplicationsBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -36,15 +34,11 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 	}
 	reqURL := bag.PageToken()
 	if reqURL == "" {
-		v := url.Values{}
-		v.Set("$select", strings.Join(servicePrincipalSelect, ","))
-		v.Set("$filter", "accountEnabled eq true AND servicePrincipalType eq 'Application'")
-		v.Set("$top", "999")
-		reqURL = e.cn.buildURL("servicePrincipals", v)
+		reqURL = e.conn.buildURL("servicePrincipals", setEnterpriseApplicationsKeys())
 	}
 
 	resp := &servicePrincipalsList{}
-	err = e.cn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
+	err = e.conn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -62,53 +56,6 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 	}
 
 	return entApps, pageToken, nil, nil
-}
-
-func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
-	profile := make(map[string]interface{})
-	profile["id"] = app.ID
-	profile["app_id"] = app.AppId
-
-	if expSlices.Contains(app.Tags, "WindowsAzureActiveDirectoryIntegratedApp") {
-		profile["is_integrated"] = true
-	}
-
-	if expSlices.Contains(app.Tags, "HideApp") {
-		profile["hidden_app"] = true
-	}
-
-	options := []resource.AppTraitOption{
-		resource.WithAppProfile(profile),
-	}
-
-	if app.Info.LogoUrl != "" {
-		options = append(options, resource.WithAppLogo(&v2.AssetRef{
-			Id: app.Info.LogoUrl,
-		}))
-	}
-	if app.Homepage != "" {
-		options = append(options, resource.WithAppHelpURL(app.Homepage))
-	}
-
-	if app.AppOwnerOrganizationId == microsoftBuiltinAppsOwnerID {
-		options = append(options, resource.WithAppFlags(v2.AppTrait_APP_FLAG_HIDDEN))
-	}
-
-	ret, err := resource.NewAppResource(
-		app.getDisplayName(),
-		enterpriseApplicationResourceType,
-		app.ID,
-		options,
-		resource.WithParentResourceID(parentResourceID),
-		resource.WithAnnotation(&v2.ExternalLink{
-			Url: app.externalURL(),
-		}),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return ret, nil
 }
 
 func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
@@ -152,9 +99,9 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 	v := url.Values{}
 	v.Set("$select", strings.Join(servicePrincipalSelect, ","))
-	reqURL := e.cn.buildURL(path.Join("servicePrincipals", resource.Id.Resource), v)
+	reqURL := e.conn.buildURL(path.Join("servicePrincipals", resource.Id.Resource), v)
 	resp := &servicePrincipal{}
-	err := e.cn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
+	err := e.conn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -197,24 +144,6 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 	return rv, "", nil, nil
 }
 
-type appRoleAssignmentList struct {
-	Context  string               `json:"@odata.context"`
-	NextLink string               `json:"@odata.nextLink"`
-	Value    []*appRoleAssignment `json:"value"`
-}
-
-type appRoleAssignment struct {
-	AppRoleId            string `json:"appRoleId"`
-	CreatedDateTime      string `json:"createdDateTime"`
-	DeletedDateTime      string `json:"deletedDateTime"`
-	Id                   string `json:"id"`
-	PrincipalDisplayName string `json:"principalDisplayName"`
-	PrincipalId          string `json:"principalId"`
-	PrincipalType        string `json:"principalType"` // The type of the assigned principal. This can either be User, Group, or ServicePrincipal. Read-only.
-	ResourceDisplayName  string `json:"resourceDisplayName"`
-	ResourceId           string `json:"resourceId"`
-}
-
 // Grants always returns an empty slice for users since they don't have any entitlements.
 func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	b := &pagination.Bag{}
@@ -240,19 +169,19 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 		ownersQuery.Set("$select", strings.Join([]string{
 			"id",
 		}, ","))
-		if e.cn.SkipAdGroups {
+		if e.conn.SkipAdGroups {
 			ownersQuery.Set("$filter", "(onPremisesSyncEnabled ne true)")
 			ownersQuery.Set("$count", "true") // Required to prevent MS Graph from returning a 400
 		}
 
-		ownersURL := e.cn.buildBetaURL(path.Join("servicePrincipals", resource.Id.Resource, ownersStr), ownersQuery)
+		ownersURL := e.conn.buildBetaURL(path.Join("servicePrincipals", resource.Id.Resource, ownersStr), ownersQuery)
 		b.Push(pagination.PageState{
 			ResourceTypeID: ownersStr,
 			Token:          ownersURL,
 		})
 
 		appRoleAssignedToQuery := url.Values{}
-		appRoleAssignedToURL := e.cn.buildBetaURL(path.Join("servicePrincipals", resource.Id.Resource, "appRoleAssignedTo"), appRoleAssignedToQuery)
+		appRoleAssignedToURL := e.conn.buildBetaURL(path.Join("servicePrincipals", resource.Id.Resource, "appRoleAssignedTo"), appRoleAssignedToQuery)
 		b.Push(pagination.PageState{
 			ResourceTypeID: assignmentStr,
 			Token:          appRoleAssignedToURL,
@@ -263,7 +192,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	switch ps.ResourceTypeID {
 	case assignmentStr:
 		resp := &appRoleAssignmentList{}
-		err = e.cn.query(ctx, graphReadScopes, http.MethodGet, ps.Token, nil, resp)
+		err = e.conn.query(ctx, graphReadScopes, http.MethodGet, ps.Token, nil, resp)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				ctxzap.Extract(ctx).Warn(
@@ -319,7 +248,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 		return grants, pageToken, nil, err
 	case ownersStr:
 		resp := &membershipList{}
-		err = e.cn.query(ctx, graphReadScopes, http.MethodGet, ps.Token, nil, resp)
+		err = e.conn.query(ctx, graphReadScopes, http.MethodGet, ps.Token, nil, resp)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				ctxzap.Extract(ctx).Warn(
@@ -389,7 +318,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 
 func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuilder {
 	return &enterpriseApplicationsBuilder{
-		cn: c,
+		conn: c,
 	}
 }
 
@@ -483,7 +412,7 @@ func (o *enterpriseApplicationsBuilder) Grant(ctx context.Context, principal *v2
 			Host:   "graph.microsoft.com",
 			Path:   path.Join("v1.0", "directoryObjects", principal.Id.Resource),
 		}
-		reqURL = o.cn.buildURL(path.Join("servicePrincipals", resourceID, "owners", "$ref"), v)
+		reqURL = o.conn.buildURL(path.Join("servicePrincipals", resourceID, "owners", "$ref"), v)
 		reqBody, err = (&assignment{
 			ObjectRef: objRef.String(),
 		}).MarshalToReader()
@@ -494,7 +423,7 @@ func (o *enterpriseApplicationsBuilder) Grant(ctx context.Context, principal *v2
 	case assignmentStr:
 		// https://learn.microsoft.com/en-us/graph/api/serviceprincipal-post-approleassignedto?view=graph-rest-1.0&tabs=http
 		// POST /servicePrincipals/{id}/appRoleAssignedTo
-		reqURL = o.cn.buildURL(path.Join("servicePrincipals", resourceID, "appRoleAssignedTo"), v)
+		reqURL = o.conn.buildURL(path.Join("servicePrincipals", resourceID, "appRoleAssignedTo"), v)
 		reqBody, err = (&appRoleAssignOperation{
 			AppRoleId:   eaEntId.AppRoleId,
 			PrincipalId: principal.Id.Resource,
@@ -507,7 +436,7 @@ func (o *enterpriseApplicationsBuilder) Grant(ctx context.Context, principal *v2
 		return nil, errors.New("baton-microsoft-entra: only can provision app roles or owners entitlements to an enterprise application")
 	}
 
-	err = o.cn.query(ctx, graphReadScopes, http.MethodPost, reqURL, reqBody, nil)
+	err = o.conn.query(ctx, graphReadScopes, http.MethodPost, reqURL, reqBody, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -531,11 +460,11 @@ func (o *enterpriseApplicationsBuilder) Revoke(ctx context.Context, grant *v2.Gr
 	case ownersStr:
 		// https://learn.microsoft.com/en-us/graph/api/serviceprincipal-delete-owners?view=graph-rest-1.0&tabs=http
 		// DELETE /servicePrincipals/{id}/owners/{id}/$ref
-		reqURL = o.cn.buildURL(path.Join("servicePrincipals", resourceID, "owners", grant.Principal.Id.Resource, "$ref"), v)
+		reqURL = o.conn.buildURL(path.Join("servicePrincipals", resourceID, "owners", grant.Principal.Id.Resource, "$ref"), v)
 	case assignmentStr:
 		// https://learn.microsoft.com/en-us/graph/api/serviceprincipal-delete-approleassignedto?view=graph-rest-1.0&tabs=http
 		// DELETE /servicePrincipals/{id}/appRoleAssignedTo/{id}
-		reqURL = o.cn.buildURL(path.Join("servicePrincipals", resourceID, "appRoleAssignedTo", grant.Id), v)
+		reqURL = o.conn.buildURL(path.Join("servicePrincipals", resourceID, "appRoleAssignedTo", grant.Id), v)
 	default:
 		l.Warn(
 			"baton-microsoft-entra: only can revoke app roles or owners entitlements to an enterprise application",
@@ -544,7 +473,7 @@ func (o *enterpriseApplicationsBuilder) Revoke(ctx context.Context, grant *v2.Gr
 		return nil, errors.New("baton-microsoft-entra: only can revoke app roles or owners entitlements to an enterprise application")
 	}
 
-	err = o.cn.query(ctx, graphReadScopes, http.MethodDelete, reqURL, nil, nil)
+	err = o.conn.query(ctx, graphReadScopes, http.MethodDelete, reqURL, nil, nil)
 	if err != nil {
 		return nil, err
 	}
