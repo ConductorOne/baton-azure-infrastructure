@@ -32,6 +32,7 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 	if err != nil {
 		return nil, "", nil, err
 	}
+
 	reqURL := bag.PageToken()
 	if reqURL == "" {
 		reqURL = e.conn.buildURL("servicePrincipals", setEnterpriseApplicationsKeys())

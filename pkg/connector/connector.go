@@ -57,7 +57,12 @@ func (d *Connector) Validate(ctx context.Context) (annotations.Annotations, erro
 	return nil, nil
 }
 
-func NewConnectorFromToken(ctx context.Context, httpClient *http.Client, token azcore.TokenCredential, mailboxSettings bool, skipAdGroups bool) (*Connector, error) {
+func NewConnectorFromToken(ctx context.Context,
+	httpClient *http.Client,
+	token azcore.TokenCredential,
+	mailboxSettings bool,
+	skipAdGroups bool,
+) (*Connector, error) {
 	client, err := uhttp.NewBaseHttpClientWithContext(ctx, httpClient)
 	if err != nil {
 		return nil, err
@@ -80,12 +85,11 @@ func NewConnectorFromToken(ctx context.Context, httpClient *http.Client, token a
 // New returns a new instance of the connector.
 func New(ctx context.Context, useCliCredentials bool, tenantID, clientID, clientSecret string, mailboxSettings bool, skipAdGroups bool) (*Connector, error) {
 	var cred azcore.TokenCredential
-	uhttpOptions := []uhttp.Option{
-		uhttp.WithLogger(true, ctxzap.Extract(ctx)),
-	}
 	httpClient, err := uhttp.NewClient(
 		ctx,
-		uhttpOptions...,
+		[]uhttp.Option{
+			uhttp.WithLogger(true, ctxzap.Extract(ctx)),
+		}...,
 	)
 	if err != nil {
 		return nil, err
@@ -95,11 +99,14 @@ func New(ctx context.Context, useCliCredentials bool, tenantID, clientID, client
 	case useCliCredentials:
 		cred, err = azidentity.NewAzureCLICredential(nil)
 	case !IsEmpty(tenantID) && !IsEmpty(clientID) && !IsEmpty(clientSecret):
-		cred, err = azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, &azidentity.ClientSecretCredentialOptions{
-			ClientOptions: azcore.ClientOptions{
-				Transport: httpClient,
-			},
-		})
+		cred, err = azidentity.NewClientSecretCredential(tenantID,
+			clientID,
+			clientSecret,
+			&azidentity.ClientSecretCredentialOptions{
+				ClientOptions: azcore.ClientOptions{
+					Transport: httpClient,
+				},
+			})
 	default:
 		cred, err = azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
 			ClientOptions: azcore.ClientOptions{
@@ -112,5 +119,10 @@ func New(ctx context.Context, useCliCredentials bool, tenantID, clientID, client
 		return nil, err
 	}
 
-	return NewConnectorFromToken(ctx, httpClient, cred, mailboxSettings, skipAdGroups)
+	return NewConnectorFromToken(ctx,
+		httpClient,
+		cred,
+		mailboxSettings,
+		skipAdGroups,
+	)
 }

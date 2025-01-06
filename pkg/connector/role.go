@@ -10,6 +10,8 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
+	grant "github.com/conductorone/baton-sdk/pkg/types/grant"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	uuid "github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	zap "go.uber.org/zap"
@@ -93,7 +95,68 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *
 }
 
 func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+	var (
+		principalId *v2.ResourceId
+		roleID      string
+		rv          []*v2.Grant
+		gr          *v2.Grant
+	)
+	lstSubscriptions, err := getAvailableSubscriptions(ctx, r.conn)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	lstResourceGroups, err := getResourceGroups(ctx, r.conn)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	for _, subscriptionID := range lstSubscriptions {
+		for _, resourceGroupName := range lstResourceGroups {
+			// Create a Role Assignments Client
+			roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.conn.token, nil)
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			// Define the resource group scope
+			scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, resourceGroupName)
+			// List role assignments for the resource group
+			pager := roleAssignmentsClient.NewListForScopePager(scope, nil)
+
+			// Iterate through the role assignments
+			for pager.More() {
+				page, err := pager.NextPage(ctx)
+				if err != nil {
+					return nil, "", nil, err
+				}
+
+				for _, assignment := range page.Value {
+					principalType, err := getPrincipalType(ctx, r.conn, *assignment.Properties.PrincipalID)
+					if err != nil {
+						continue
+					}
+
+					principalId = getPrincipalResourceType(principalType, assignment)
+					roleDefinitionID := assignment.Properties.RoleDefinitionID
+					roleID = resourceGroupName + ":" + getRoleIdForResourceGroup(roleDefinitionID)
+					roleRes, err := rs.NewResource(
+						*assignment.Name,
+						resourceGroupResourceType,
+						roleID,
+					)
+					if err != nil {
+						return nil, "", nil, err
+					}
+
+					gr = grant.NewGrant(roleRes, typeMembers, principalId)
+					rv = append(rv, gr)
+				}
+			}
+		}
+	}
+
+	return rv, "", nil, nil
 }
 
 func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
@@ -104,6 +167,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 			zap.String("principal_type", principal.Id.ResourceType),
 			zap.String("principal_id", principal.Id.Resource),
 		)
+
 		return nil, fmt.Errorf("azure-infrastructure-connector: only users can be granted role membership")
 	}
 
@@ -117,6 +181,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	roleId := roleIDs[1]
 	resourceGroupId := resGroupId
 	principalID := principal.Id.Resource // Object ID of the user, group, or service principal
+
 	// Initialize the client
 	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, nil)
 	if err != nil {
@@ -139,6 +204,8 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	}
 
 	// Create the role assignment
+	// In azure, you do not directly add users to resource groups. Instead, you assigned roles
+	// to users for the resource group, which gives them specific permissions.
 	resp, err := client.Create(ctx, scope, roleAssignmentId, parameters, nil)
 	if err != nil {
 		return nil, err

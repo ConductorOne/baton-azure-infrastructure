@@ -44,7 +44,7 @@ var (
 	}
 
 	resourceGroupResourceType = &v2.ResourceType{
-		Id:          "resource-group",
+		Id:          "resource_group",
 		DisplayName: "Resource Group of Azure Infrastructure",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP},
 	}

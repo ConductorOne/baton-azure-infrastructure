@@ -35,6 +35,7 @@ const (
 	spTypeSocialIdp           = "SocialIdp"
 	typeOwners                = "owners"
 	typeMembers               = "members"
+	typeAssigned              = "assigned"
 )
 
 func (g *groupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {

@@ -67,17 +67,16 @@ func (s *subscriptionBuilder) Grants(ctx context.Context, resource *v2.Resource,
 		rv             []*v2.Grant
 		gr             *v2.Grant
 		roleID         string
-		principalId    *v2.ResourceId
 		subscriptionID = resource.Id.Resource
 	)
 	// Create a new RoleAssignmentsClient
-	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, s.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, s.conn.token, nil)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	// Iterate over all role assignments
-	pager := client.NewListPager(nil)
+	pager := roleAssignmentsClient.NewListPager(nil)
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
@@ -90,29 +89,7 @@ func (s *subscriptionBuilder) Grants(ctx context.Context, resource *v2.Resource,
 				continue
 			}
 
-			switch principalType {
-			case "#microsoft.graph.user":
-				principalId = &v2.ResourceId{
-					ResourceType: userResourceType.Id,
-					Resource:     *assignment.Properties.PrincipalID,
-				}
-			case "#microsoft.graph.group":
-				principalId = &v2.ResourceId{
-					ResourceType: resourceGroupResourceType.Id,
-					Resource:     *assignment.Properties.PrincipalID,
-				}
-			case "Application":
-				principalId = &v2.ResourceId{
-					ResourceType: enterpriseApplicationResourceType.Id,
-					Resource:     *assignment.Properties.PrincipalID,
-				}
-			case "ManagedIdentity":
-				principalId = &v2.ResourceId{
-					ResourceType: managedIdentitylResourceType.Id,
-					Resource:     *assignment.Properties.PrincipalID,
-				}
-			}
-
+			principalId := getPrincipalResourceType(principalType, assignment)
 			roleDefinitionID := assignment.Properties.RoleDefinitionID
 			roleID = getRoleId(roleDefinitionID)
 			roleRes, err := rs.NewResource(
