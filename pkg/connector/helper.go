@@ -435,7 +435,7 @@ func resourceGroupResource(ctx context.Context, subscriptionID string, rg *armre
 	resource, err := rs.NewResource(
 		StringValue(rg.Name),
 		resourceGroupResourceType,
-		StringValue(rg.Name),
+		StringValue(rg.Name)+":"+subscriptionID,
 		opts...,
 	)
 	if err != nil {
@@ -470,7 +470,7 @@ func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, pa
 		strRoleID string
 		opts      []rs.ResourceOption
 	)
-	strRoleID = getRoleId(role.ID)
+	strRoleID = getRoleId(role.ID) // roleID + subscriptionID
 	profile := map[string]interface{}{
 		"id":                 strRoleID,
 		"name":               StringValue(role.Properties.RoleName),
@@ -501,18 +501,7 @@ func getRoleId(roleID *string) string {
 	if strings.Contains(StringValue(roleID), "/") {
 		arr := strings.Split(StringValue(roleID), "/")
 		if len(arr) > 0 {
-			return arr[2] + ":" + arr[len(arr)-1]
-		}
-	}
-
-	return ""
-}
-
-func getRoleIdForResourceGroup(roleID *string) string {
-	if strings.Contains(StringValue(roleID), "/") {
-		arr := strings.Split(StringValue(roleID), "/")
-		if len(arr) > 0 {
-			return arr[2] + ":" + arr[len(arr)-1]
+			return arr[len(arr)-1] + ":" + arr[2] // roleID + subscriptionID
 		}
 	}
 
@@ -649,54 +638,6 @@ func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, p
 	}
 
 	return ret, nil
-}
-
-func getAvailableSubscriptions(ctx context.Context, conn *Connector) ([]string, error) {
-	lstSubscriptions := []string{}
-	pager := conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
-	for pager.More() {
-		page, err := pager.NextPage(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, subscription := range page.Value {
-			lstSubscriptions = append(lstSubscriptions, *subscription.SubscriptionID)
-		}
-	}
-
-	return lstSubscriptions, nil
-}
-
-func getResourceGroups(ctx context.Context, conn *Connector) ([]string, error) {
-	lstResourceGroups := []string{}
-	pagerSubscriptions := conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
-	for pagerSubscriptions.More() {
-		page, err := pagerSubscriptions.NextPage(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, subscription := range page.Value {
-			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, conn.token, nil)
-			if err != nil {
-				return nil, err
-			}
-
-			for pager := client.NewListPager(nil); pager.More(); {
-				page, err := pager.NextPage(ctx)
-				if err != nil {
-					return nil, err
-				}
-
-				for _, groupList := range page.Value {
-					lstResourceGroups = append(lstResourceGroups, *groupList.Name)
-				}
-			}
-		}
-	}
-
-	return lstResourceGroups, nil
 }
 
 func getAllRoles(ctx context.Context, conn *Connector) ([]string, error) {
