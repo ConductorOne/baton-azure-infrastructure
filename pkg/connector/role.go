@@ -157,7 +157,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	}
 
 	entitlementIDs := strings.Split(entitlement.Resource.Id.Resource, ":")
-	if len(entitlementIDs) < 2 || len(entitlementIDs) > 2 {
+	if len(entitlementIDs) != 2 {
 		return nil, fmt.Errorf("invalid role id")
 	}
 
@@ -218,24 +218,26 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 		return nil, fmt.Errorf("azure-infrastructure-connector: only users can have role membership revoked")
 	}
 
-	// principalID := principal.Id.Resource
+	principalID := principal.Id.Resource
 	entitlementResource := entitlement.Resource.Id.Resource
 	if !strings.Contains(entitlementResource, ":") {
 		return nil, fmt.Errorf("invalid role id")
 	}
 
 	entitlementIDs := strings.Split(entitlement.Resource.Id.Resource, ":")
-	if len(entitlementIDs) < 2 || len(entitlementIDs) > 2 {
+	if len(entitlementIDs) != 3 {
 		return nil, fmt.Errorf("invalid role id")
 	}
 
 	subscriptionId := entitlementIDs[1]
-	roleID := entitlementIDs[0]
+	roleID := entitlementIDs[2]
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionId)
 	// Full resource ID of the role assignment to delete
-	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleID)
-	// roleAssignmentID := "/subscriptions/39ea64c5-86d5-4c29-8199-5b602c90e1c5/providers/Microsoft.Authorization/roleAssignments/3c2c3203-3353-4a67-9705-6fe990064677"
-	roleAssignmentID := roleDefinitionID
+	roleAssignmentID, err := getRoleAssignmentID(ctx, r.conn, subscriptionId, roleID, principalID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create a RoleAssignmentsClient
 	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, nil)
 	if err != nil {

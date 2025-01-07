@@ -21,6 +21,8 @@ type roleAssignmentResourceGroupBuilder struct {
 	conn *Connector
 }
 
+const invalidRoleID = "invalid role id"
+
 func (ra *roleAssignmentResourceGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return roleAssignmentResourceGroupType
 }
@@ -164,15 +166,19 @@ func (ra *roleAssignmentResourceGroupBuilder) Grant(ctx context.Context, princip
 		return nil, fmt.Errorf("azure-infrastructure-connector: only users can be granted role membership")
 	}
 
-	role := entitlement.Resource.Id.Resource
-	roleIDs := strings.Split(role, ":")
-	if len(roleIDs) > 0 && len(roleIDs) < 4 {
+	entitlementResource := entitlement.Resource.Id.Resource
+	if !strings.Contains(entitlementResource, ":") {
 		return nil, fmt.Errorf("invalid role id")
 	}
 
-	resourceGroupId := roleIDs[0]
-	subscriptionId := roleIDs[1]
-	roleId := roleIDs[2]
+	entitlementIDs := strings.Split(entitlement.Resource.Id.Resource, ":")
+	if len(entitlementIDs) != 3 {
+		return nil, fmt.Errorf("invalid role id")
+	}
+
+	resourceGroupId := entitlementIDs[0]
+	subscriptionId := entitlementIDs[1]
+	roleId := entitlementIDs[2]
 	principalID := principal.Id.Resource // Object ID of the user, group, or service principal
 	// Initialize the client
 	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, ra.conn.token, nil)
@@ -217,6 +223,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grant(ctx context.Context, princip
 func (ra *roleAssignmentResourceGroupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 	principal := grant.Principal
+	entitlement := grant.Entitlement
 	if principal.Id.ResourceType != userResourceType.Id {
 		l.Warn(
 			"azure-infrastructure-connector: only users can have role membership revoked",
@@ -226,25 +233,48 @@ func (ra *roleAssignmentResourceGroupBuilder) Revoke(ctx context.Context, grant 
 		return nil, fmt.Errorf("azure-infrastructure-connector: only users can have role membership revoked")
 	}
 
+	principalID := principal.Id.Resource
+	entitlementResource := entitlement.Resource.Id.Resource
+	if !strings.Contains(entitlementResource, ":") {
+		return nil, fmt.Errorf("%s", invalidRoleID)
+	}
+
+	entitlementIDs := strings.Split(entitlement.Resource.Id.Resource, ":")
+	if len(entitlementIDs) != 3 {
+		return nil, fmt.Errorf("%s", invalidRoleID)
+	}
+
+	resourceGroupID := entitlementIDs[0]
+	subscriptionId := entitlementIDs[1]
+	roleID := entitlementIDs[2]
 	// Replace with your subscription ID and role assignment ID
-	roleID := "0105a6b0-4bb9-43d2-982a-12806f9faddb" // Full resource ID of the role assignment to delete
-	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", "subsID", "resGroupId")
-	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", "subsID", roleID)
-	roleAssignmentID := roleDefinitionID
+	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionId, resourceGroupID)
+	// role assignment to delete
+	roleAssignmentName, err := getResourceGroupRoleAssignmentID(ctx,
+		ra.conn,
+		subscriptionId,
+		resourceGroupID,
+		roleID,
+		principalID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create a RoleAssignmentsClient
-	client, err := armauthorization.NewRoleAssignmentsClient("subsID", ra.conn.token, nil)
+	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, ra.conn.token, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	// Delete the role assignment
-	_, err = client.Delete(ctx, scope, roleAssignmentID, nil)
+	_, err = client.Delete(ctx, scope, roleAssignmentName, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	l.Warn("Role assignment successfully revoked.",
-		zap.String("roleAssignmentID", roleAssignmentID),
+		zap.String("roleAssignmentID", roleAssignmentName),
 	)
 
 	return nil, nil

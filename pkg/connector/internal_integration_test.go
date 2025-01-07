@@ -118,6 +118,20 @@ func TestResourceGroupBuilderList(t *testing.T) {
 	require.Nil(t, err)
 }
 
+func TestRoleAssignmentResourceGroupBuilderList(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	ra := &roleAssignmentResourceGroupBuilder{
+		conn: &connTest,
+	}
+	_, _, _, err = ra.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
+	require.Nil(t, err)
+}
 func TestRoleBuilderList(t *testing.T) {
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
 		t.Skip()
@@ -212,7 +226,7 @@ func TestSubscriptionGrants(t *testing.T) {
 	res, err := rs.NewResource(
 		"Azure subscription 1",
 		subscriptionsResourceType,
-		"39ea64c5-86d5-4c29-8199-5b602c90e1c5",
+		subscriptionIDForTesting,
 	)
 	require.Nil(t, err)
 
@@ -224,6 +238,21 @@ func parseEntitlementID(id string) (*v2.ResourceId, []string, error) {
 	parts := strings.Split(id, ":")
 	// Need to be at least 3 parts type:entitlement_id:slug
 	if len(parts) < 4 || len(parts) > 4 {
+		return nil, nil, fmt.Errorf("azure-infrastructure-connector: invalid resource id")
+	}
+
+	resourceId := &v2.ResourceId{
+		ResourceType: parts[0],
+		Resource:     strings.Join(parts[1:len(parts)-1], ":"),
+	}
+
+	return resourceId, parts, nil
+}
+
+func parseRoleAssignmentEntitlementID(id string) (*v2.ResourceId, []string, error) {
+	parts := strings.Split(id, ":")
+	// Need to be at least 3 parts type:entitlement_id:slug
+	if len(parts) < 4 || len(parts) > 5 {
 		return nil, nil, fmt.Errorf("azure-infrastructure-connector: invalid resource id")
 	}
 
@@ -340,7 +369,7 @@ func TestListingResourceGroupContent(t *testing.T) {
 
 	// Define variables
 	resourceGroupName := "test_resource_group"
-	subscriptionID := "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
+	subscriptionID := subscriptionIDForTesting
 
 	// Create a Resources client
 	client, err := armresources.NewClient(subscriptionID, connTest.token, nil)
@@ -373,7 +402,7 @@ func TestGetPrincipalType(t *testing.T) {
 	require.Nil(t, err)
 
 	// principalID := "eeffc762-5afc-472e-bdc1-c27c9ec62d02"
-	principalID := "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+	principalID := grantPrincipalForTesting
 	_, err = getPrincipalType(ctxTest, &connTest, principalID)
 	require.Nil(t, err)
 }
@@ -400,16 +429,19 @@ func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	// resource_group:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
-	grantEntitlement := "resource_group:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned"
+	// ___________________________________________________________________________________________________________
+	// resource-name | resource-id | subscription-id | role-id | roleEntitlement | principal-type | principal-id
+	// -----------------------------------------------------------------------------------------------------------
+	// resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
+	grantEntitlement := "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned"
 	grantPrincipalType := "user"
 	grantPrincipal := "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
-	_, data, err := parseEntitlementID(grantEntitlement)
+	_, data, err := parseRoleAssignmentEntitlementID(grantEntitlement)
 	require.Nil(t, err)
 	require.NotNil(t, data)
 
-	roleEntitlement = data[2]
-	resource, err := getRoleAssignmentResourceGroupForTesting(ctxTest, data[2], data[1], "test_resource_group", "testing role")
+	roleEntitlement = data[4]
+	resource, err := getRoleAssignmentResourceGroupForTesting(ctxTest, data[2], data[3], "test_resource_group", "testing role")
 	require.Nil(t, err)
 
 	entitlement := getEntitlementForTesting(resource, grantPrincipalType, roleEntitlement)
@@ -422,6 +454,34 @@ func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
 			Resource:     grantPrincipal,
 		},
 	}, entitlement)
+	require.Nil(t, err)
+}
+
+func TestRoleAssignmentResourceGroupRevoke(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	// resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
+	revokeGrant := "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a "
+	data := strings.Split(revokeGrant, ":")
+	principalID := &v2.ResourceId{ResourceType: userResourceType.Id, Resource: "72af6288-7040-49ca-a2f0-51ce6ba5a78a"}
+	resource, err := getRoleAssignmentResourceGroupForTesting(ctxTest, data[2], data[3], data[1], "testing role")
+	require.Nil(t, err)
+
+	gr := grant.NewGrant(resource, typeAssigned, principalID)
+	annos := annotations.Annotations(gr.Annotations)
+	gr.Annotations = annos
+	require.NotNil(t, gr)
+
+	// --revoke-grant "role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+	l := &roleAssignmentResourceGroupBuilder{
+		conn: &connTest,
+	}
+	_, err = l.Revoke(ctxTest, gr)
 	require.Nil(t, err)
 }
 
