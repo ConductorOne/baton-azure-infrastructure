@@ -760,18 +760,15 @@ func getResourceGroups(ctx context.Context, conn *Connector) ([]string, error) {
 	return lstResourceGroups, nil
 }
 
-func getResourceGroupRoleAssignmentID(ctx context.Context, conn *Connector, subscriptionID, resourceGroupName, roleId, principalID string) (string, error) {
+func getResourceGroupRoleAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID, resourceGroupName, roleId, principalID string) (string, error) {
 	// Create a Role Assignments Client
 	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, conn.token, nil)
 	if err != nil {
 		return "", err
 	}
 
-	// Define the resource group scope
-	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, resourceGroupName)
 	// List role assignments for the resource group
 	pagerResourceGroup := roleAssignmentsClient.NewListForScopePager(scope, nil)
-
 	// Iterate through the role assignments
 	for pagerResourceGroup.More() {
 		page, err := pagerResourceGroup.NextPage(ctx)
@@ -788,7 +785,7 @@ func getResourceGroupRoleAssignmentID(ctx context.Context, conn *Connector, subs
 		}
 	}
 
-	return "", nil
+	return "", fmt.Errorf("role assignment not found")
 }
 
 func getRoleAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID, roleId, principalID string) (string, error) {
@@ -816,5 +813,5 @@ func getRoleAssignmentID(ctx context.Context, conn *Connector, scope, subscripti
 		}
 	}
 
-	return "", fmt.Errorf("RoleAssignmentID not found")
+	return "", fmt.Errorf("role assignment not found")
 }

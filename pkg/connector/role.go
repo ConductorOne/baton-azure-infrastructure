@@ -258,10 +258,12 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 		return nil, err
 	}
 
-	l.Warn("Role assignment successfully revoked.",
-		zap.String("roleAssignmentID", roleAssignmentName),
-		zap.String("ID", *roleAssignmentResponse.ID),
-	)
+	if roleAssignmentResponse.ID != nil {
+		l.Warn("Role assignment successfully revoked.",
+			zap.String("roleAssignmentID", roleAssignmentName),
+			zap.String("ID", *roleAssignmentResponse.ID),
+		)
+	}
 
 	return nil, nil
 }

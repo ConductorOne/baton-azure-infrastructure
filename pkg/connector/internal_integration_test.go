@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"testing"
@@ -365,39 +364,6 @@ func TestRoleRevoke(t *testing.T) {
 	require.Nil(t, err)
 }
 
-func TestListingResourceGroupContent(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.Nil(t, err)
-
-	// Define variables
-	resourceGroupName := "test_resource_group"
-	subscriptionID := subscriptionIDForTesting
-
-	// Create a Resources client
-	client, err := armresources.NewClient(subscriptionID, connTest.token, nil)
-	require.Nil(t, err)
-
-	// List resources in the resource group
-	pager := client.NewListByResourceGroupPager(resourceGroupName, nil)
-	log.Printf("Resources in resource group %s:\n", resourceGroupName)
-
-	// Iterate through the pages of results
-	for pager.More() {
-		page, err := pager.NextPage(ctxTest)
-		if err != nil {
-			log.Fatalf("Failed to get next page: %v", err)
-		}
-
-		for _, resource := range page.Value {
-			log.Printf("- Name: %s, Type: %s\n", *resource.Name, *resource.Type)
-		}
-	}
-}
-
 func TestGetPrincipalType(t *testing.T) {
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
 		t.Skip()
@@ -407,7 +373,6 @@ func TestGetPrincipalType(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	// principalID := "eeffc762-5afc-472e-bdc1-c27c9ec62d02"
 	principalID := grantPrincipalForTesting
 	_, err = getPrincipalType(ctxTest, &connTest, principalID)
 	require.Nil(t, err)
@@ -418,7 +383,6 @@ func TestListAllRoles(t *testing.T) {
 		t.Skip()
 	}
 
-	// Authenticate with Microsoft Graph
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
@@ -427,7 +391,6 @@ func TestListAllRoles(t *testing.T) {
 }
 
 func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
-	var roleEntitlement string
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
 		t.Skip()
 	}
@@ -435,10 +398,10 @@ func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	// ___________________________________________________________________________________________________________
-	// resource-name | resource-id | subscription-id | role-id | roleEntitlement | principal-type | principal-id
-	// -----------------------------------------------------------------------------------------------------------
-	// resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
+	// ---------------------------------------------------------------------------
+	// resource-name | resource-id | subscription-id | role-id | roleEntitlement |
+	// ---------------------------------------------------------------------------
+	// resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned
 	grantEntitlement := "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned"
 	grantPrincipalType := "user"
 	grantPrincipal := "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
@@ -446,7 +409,7 @@ func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
 	require.Nil(t, err)
 	require.NotNil(t, data)
 
-	roleEntitlement = data[4]
+	roleEntitlement := data[4]
 	resource, err := getRoleAssignmentResourceGroupForTesting(ctxTest, data[2], data[3], "test_resource_group", "testing role")
 	require.Nil(t, err)
 
@@ -471,6 +434,9 @@ func TestRoleAssignmentResourceGroupRevoke(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
+	// -----------------------------------------------------------------------------------------------------------
+	// resource-name | resource-id | subscription-id | role-id | roleEntitlement | principal-type | principal-id
+	// -----------------------------------------------------------------------------------------------------------
 	// resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
 	revokeGrant := "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a "
 	data := strings.Split(revokeGrant, ":")

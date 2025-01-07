@@ -252,6 +252,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Revoke(ctx context.Context, grant 
 	// role assignment to delete
 	roleAssignmentName, err := getResourceGroupRoleAssignmentID(ctx,
 		ra.conn,
+		scope,
 		subscriptionId,
 		resourceGroupID,
 		roleID,
@@ -268,14 +269,17 @@ func (ra *roleAssignmentResourceGroupBuilder) Revoke(ctx context.Context, grant 
 	}
 
 	// Delete the role assignment
-	_, err = client.Delete(ctx, scope, roleAssignmentName, nil)
+	roleAssignmentDeleteResponse, err := client.Delete(ctx, scope, roleAssignmentName, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	l.Warn("Role assignment successfully revoked.",
-		zap.String("roleAssignmentID", roleAssignmentName),
-	)
+	if roleAssignmentDeleteResponse.ID != nil {
+		l.Warn("Role assignment successfully revoked.",
+			zap.String("roleAssignmentID", roleAssignmentName),
+			zap.String("ID", *roleAssignmentDeleteResponse.ID),
+		)
+	}
 
 	return nil, nil
 }
