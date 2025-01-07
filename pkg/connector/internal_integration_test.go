@@ -25,6 +25,7 @@ var (
 	azureTenantId            = os.Getenv("BATON_AZURE_TENANT_ID")
 	ctxTest                  = context.Background()
 	grantPrincipalForTesting = "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+	roleForTesting           = "11102f94-c441-49e6-a78b-ef80e0188abc"
 	subscriptionIDForTesting = "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
 )
 
@@ -143,11 +144,32 @@ func TestRoleGrants(t *testing.T) {
 	r := &roleBuilder{
 		conn: &connTest,
 	}
-	_, _, _, err = r.Grants(ctxTest, &v2.Resource{}, &pagination.Token{})
+
+	lstRoles, err := getAllRoles(ctxTest, &connTest, subscriptionIDForTesting)
 	require.Nil(t, err)
+
+	roleDefinitionID := fmt.Sprintf(
+		"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
+		subscriptionIDForTesting,
+		roleForTesting,
+	)
+	for _, rl := range lstRoles {
+		rs, err := roleResource(ctxTest, &armauthorization.RoleDefinition{
+			ID: &roleDefinitionID,
+			Properties: &armauthorization.RoleDefinitionProperties{
+				RoleName:    &rl,
+				Description: &rl,
+				RoleType:    &rl,
+			},
+		}, nil)
+		require.Nil(t, err)
+
+		_, _, _, err = r.Grants(ctxTest, rs, nil)
+		require.Nil(t, err)
+	}
 }
 
-func TestResourceGroupGrants(t *testing.T) {
+func TestRoleAssignmentResourceGroupGrants(t *testing.T) {
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
 		t.Skip()
 	}
@@ -155,16 +177,16 @@ func TestResourceGroupGrants(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	r := &resourceGroupBuilder{
+	r := &roleAssignmentResourceGroupBuilder{
 		conn: &connTest,
 	}
 	lstResourceGroups, err := getResourceGroups(ctxTest, &connTest)
 	require.Nil(t, err)
 
 	for _, rg := range lstResourceGroups {
-		gr, err := resourceGroupResource(ctxTest,
+		gr, err := roleAssignmentResourceGroupResource(ctxTest,
 			subscriptionIDForTesting,
-			"11102f94-c441-49e6-a78b-ef80e0188abc",
+			roleForTesting,
 			&armresources.ResourceGroup{
 				ID:   &rg,
 				Name: &rg,
@@ -225,12 +247,15 @@ func getRoleForTesting(ctxTest context.Context, subscriptionId, roleId, name, de
 	}, nil)
 }
 
-func getResourceGroupForTesting(ctxTest context.Context, subscriptionId, roleId, name, description string) (*v2.Resource, error) {
+func getRoleAssignmentResourceGroupForTesting(ctxTest context.Context, subscriptionId, roleId, name, description string) (*v2.Resource, error) {
 	strRoleId := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
-	return resourceGroupResource(ctxTest, subscriptionId, roleId, &armresources.ResourceGroup{
-		ID:   &strRoleId,
-		Name: &name,
-	}, nil)
+	return roleAssignmentResourceGroupResource(ctxTest,
+		subscriptionId,
+		roleId,
+		&armresources.ResourceGroup{
+			ID:   &strRoleId,
+			Name: &name,
+		}, nil)
 }
 
 func getEntitlementForTesting(resource *v2.Resource, resourceDisplayName, entitlement string) *v2.Entitlement {
@@ -366,7 +391,7 @@ func TestListAllRoles(t *testing.T) {
 	require.Nil(t, err)
 }
 
-func TestResourceGroupGrant(t *testing.T) {
+func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
 	var roleEntitlement string
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
 		t.Skip()
@@ -384,11 +409,11 @@ func TestResourceGroupGrant(t *testing.T) {
 	require.NotNil(t, data)
 
 	roleEntitlement = data[2]
-	resource, err := getResourceGroupForTesting(ctxTest, data[2], data[1], "test_resource_group", "testing role")
+	resource, err := getRoleAssignmentResourceGroupForTesting(ctxTest, data[2], data[1], "test_resource_group", "testing role")
 	require.Nil(t, err)
 
 	entitlement := getEntitlementForTesting(resource, grantPrincipalType, roleEntitlement)
-	g := &resourceGroupBuilder{
+	g := &roleAssignmentResourceGroupBuilder{
 		conn: &connTest,
 	}
 	_, err = g.Grant(ctxTest, &v2.Resource{
@@ -398,4 +423,34 @@ func TestResourceGroupGrant(t *testing.T) {
 		},
 	}, entitlement)
 	require.Nil(t, err)
+}
+
+func TestResourceGroupEntitlements(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	rg := &roleAssignmentResourceGroupBuilder{
+		conn: &connTest,
+	}
+
+	lstResourceGroups, err := getResourceGroups(ctxTest, &connTest)
+	require.Nil(t, err)
+
+	for _, rgs := range lstResourceGroups {
+		rs, err := roleAssignmentResourceGroupResource(ctxTest,
+			subscriptionIDForTesting,
+			roleForTesting,
+			&armresources.ResourceGroup{
+				ID:   &rgs,
+				Name: &rgs,
+			}, nil)
+		require.Nil(t, err)
+
+		_, _, _, err = rg.Entitlements(ctxTest, rs, nil)
+		require.Nil(t, err)
+	}
 }

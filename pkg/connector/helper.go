@@ -422,7 +422,7 @@ func getResourceGroupID(name, subscriptionID, roleID string) string {
 }
 
 // https://learn.microsoft.com/es-es/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
-func resourceGroupResource(ctx context.Context, subscriptionID, roleID string, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func resourceGroupResource(ctx context.Context, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var opts []rs.ResourceOption
 	profile := map[string]interface{}{
 		"id":       StringValue(rg.ID),
@@ -439,6 +439,33 @@ func resourceGroupResource(ctx context.Context, subscriptionID, roleID string, r
 	resource, err := rs.NewResource(
 		StringValue(rg.Name),
 		resourceGroupResourceType,
+		StringValue(rg.Name),
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return resource, nil
+}
+
+func roleAssignmentResourceGroupResource(ctx context.Context, subscriptionID, roleID string, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+	var opts []rs.ResourceOption
+	profile := map[string]interface{}{
+		"id":       StringValue(rg.ID),
+		"name":     StringValue(rg.Name),
+		"type":     StringValue(rg.Type),
+		"location": StringValue(rg.Location),
+	}
+
+	groupListTraitOptions := []rs.GroupTraitOption{
+		rs.WithGroupProfile(profile),
+	}
+
+	opts = append(opts, rs.WithGroupTrait(groupListTraitOptions...), rs.WithParentResourceID(parentResourceID))
+	resource, err := rs.NewResource(
+		StringValue(rg.Name),
+		roleAssignmentResourceGroupType,
 		getResourceGroupID(
 			StringValue(rg.Name),
 			subscriptionID,

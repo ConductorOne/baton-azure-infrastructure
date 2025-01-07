@@ -49,6 +49,12 @@ var (
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP},
 	}
 
+	roleAssignmentResourceGroupType = &v2.ResourceType{
+		Id:          "resource_group_role_assignment",
+		DisplayName: "Role Assignment Resource Group of Azure Infrastructure",
+		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP},
+	}
+
 	roleResourceType = &v2.ResourceType{
 		Id:          "role",
 		DisplayName: "Role",
