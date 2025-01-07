@@ -10,8 +10,8 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
-	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	uuid "github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -35,6 +35,11 @@ func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.R
 		}
 
 		for _, subscription := range page.Value {
+			lstRoles, err := getAllRoles(ctx, rg.conn, *subscription.SubscriptionID)
+			if err != nil {
+				return nil, "", nil, err
+			}
+
 			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, rg.conn.token, nil)
 			if err != nil {
 				return nil, "", nil, err
@@ -51,15 +56,21 @@ func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.R
 				// Other clients may be adding/deleting items from the collection while
 				// this code is paging; some items may be skipped or returned multiple times.
 				for _, resourceGroup := range page.Value {
-					gr, err := resourceGroupResource(ctx, *subscription.SubscriptionID, resourceGroup, &v2.ResourceId{
-						ResourceType: subscriptionsResourceType.Id,
-						Resource:     StringValue(subscription.SubscriptionID),
-					})
-					if err != nil {
-						return nil, "", nil, err
-					}
+					for _, roleID := range lstRoles {
+						gr, err := resourceGroupResource(ctx,
+							*subscription.SubscriptionID,
+							roleID,
+							resourceGroup,
+							&v2.ResourceId{
+								ResourceType: subscriptionsResourceType.Id,
+								Resource:     StringValue(subscription.SubscriptionID),
+							})
+						if err != nil {
+							return nil, "", nil, err
+						}
 
-					rv = append(rv, gr)
+						rv = append(rv, gr)
+					}
 				}
 			}
 		}
@@ -68,63 +79,37 @@ func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.R
 	return rv, "", nil, nil
 }
 
-func getEntitlementId(resource *v2.Resource, ctype string) string {
-	return strings.Join(
-		[]string{
-			resourceGroupResourceType.Id,
-			resource.Id.Resource,
-			ctype,
-		},
-		":")
-}
-
 func (rg *resourceGroupBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var rv []*v2.Entitlement
-	// lstRoles, err := getAllRoles(ctx, rg.conn)
-	// if err != nil {
-	// 	return nil, "", nil, err
-	// }
-
-	// for _, subscriptionID := range lstSubscriptions {
-	// 	for _, roleId := range lstRoles {
-	v := &v2.Entitlement{
-		Id:          getEntitlementId(resource, typeOwners),
-		Resource:    resource,
-		DisplayName: fmt.Sprintf("%s Resource Group Owner", resource.DisplayName),
-		Description: fmt.Sprintf("Owner of %s resource group", resource.DisplayName),
-		GrantableTo: []*v2.ResourceType{userResourceType},
-		Purpose:     v2.Entitlement_PURPOSE_VALUE_PERMISSION,
-		Slug:        "owner",
+	options := []ent.EntitlementOption{
+		ent.WithDisplayName(fmt.Sprintf("%s Resource Group Owner", resource.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("Owner of %s resource group", resource.DisplayName)),
+		ent.WithGrantableTo(userResourceType),
 	}
-	rv = append(rv, v)
+	rv = append(rv, ent.NewPermissionEntitlement(resource, typeOwners, options...))
 
-	v = &v2.Entitlement{
-		Id:          getEntitlementId(resource, typeAssigned),
-		Resource:    resource,
-		DisplayName: fmt.Sprintf("%s Resource Group Assignment", resource.DisplayName),
-		Description: fmt.Sprintf("Assigned to %s resource group", resource.DisplayName),
-		GrantableTo: []*v2.ResourceType{userResourceType, groupResourceType},
-		Purpose:     v2.Entitlement_PURPOSE_VALUE_ASSIGNMENT,
-		Slug:        "assigned",
+	options = []ent.EntitlementOption{
+		ent.WithDisplayName(fmt.Sprintf("%s Resource Group Member", resource.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("Assigned to %s resource group", resource.DisplayName)),
+		ent.WithGrantableTo(userResourceType, groupResourceType),
 	}
-	rv = append(rv, v)
-	// 	}
-	// }
+	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeAssigned, options...))
 
 	return rv, "", nil, nil
 }
 
 func (rg *resourceGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	var (
-		subscriptionID, resourceGroupName, roleID string
 		rv                                        []*v2.Grant
 		gr                                        *v2.Grant
 		principalId                               *v2.ResourceId
+		subscriptionID, resourceGroupName, roleID string
 	)
 	arr := strings.Split(resource.Id.Resource, ":")
-	if len(arr) > 0 || len(arr) < 1 {
+	if len(arr) > 0 && len(arr) < 4 {
 		subscriptionID = arr[1]
 		resourceGroupName = arr[0]
+		roleID = arr[2]
 	}
 
 	// Create a Role Assignments Client
@@ -137,7 +122,6 @@ func (rg *resourceGroupBuilder) Grants(ctx context.Context, resource *v2.Resourc
 	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, resourceGroupName)
 	// List role assignments for the resource group
 	pagerResourceGroup := roleAssignmentsClient.NewListForScopePager(scope, nil)
-
 	// Iterate through the role assignments
 	for pagerResourceGroup.More() {
 		page, err := pagerResourceGroup.NextPage(ctx)
@@ -146,25 +130,21 @@ func (rg *resourceGroupBuilder) Grants(ctx context.Context, resource *v2.Resourc
 		}
 
 		for _, assignment := range page.Value {
+			roleDefinitionID := fmt.Sprintf(
+				"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
+				subscriptionID,
+				roleID)
+			if roleDefinitionID != *assignment.Properties.RoleDefinitionID {
+				continue
+			}
+
 			principalType, err := getPrincipalType(ctx, rg.conn, *assignment.Properties.PrincipalID)
 			if err != nil {
 				continue
 			}
 
-			principalId = getPrincipalResourceType(principalType, assignment)
-			// roleDefinitionID := assignment.Properties.RoleDefinitionID
-			// roleID = resourceGroupName + ":" + getRoleIdForResourceGroup(roleDefinitionID)
-			roleID = resource.Id.Resource
-			roleRes, err := rs.NewResource(
-				*assignment.Name,
-				resourceGroupResourceType,
-				roleID,
-			)
-			if err != nil {
-				return nil, "", nil, err
-			}
-
-			gr = grant.NewGrant(roleRes, typeAssigned, principalId)
+			principalId = getPrincipalIDResource(principalType, assignment)
+			gr = grant.NewGrant(resource, typeAssigned, principalId)
 			rv = append(rv, gr)
 		}
 	}
@@ -186,17 +166,17 @@ func (rg *resourceGroupBuilder) Grant(ctx context.Context, principal *v2.Resourc
 
 	role := entitlement.Resource.Id.Resource
 	roleIDs := strings.Split(role, ":")
-	if len(roleIDs) < 2 || len(roleIDs) > 2 {
+	if len(roleIDs) > 0 && len(roleIDs) < 4 {
 		return nil, fmt.Errorf("invalid role id")
 	}
 
-	subscriptionId := roleIDs[1]
-	roleId := "312a565d-c81f-4fd8-895a-4e21e48d571c" // (( ??))
 	resourceGroupId := roleIDs[0]
+	subscriptionId := roleIDs[1]
+	roleId := roleIDs[2]
 	principalID := principal.Id.Resource // Object ID of the user, group, or service principal
 
 	// Initialize the client
-	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, rg.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, rg.conn.token, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +185,6 @@ func (rg *resourceGroupBuilder) Grant(ctx context.Context, principal *v2.Resourc
 	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionId, resourceGroupId)
 	// Define the details of the role assignment
 	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
-
 	// Create a role assignment name (must be unique)
 	roleAssignmentId := uuid.New().String()
 	// Prepare role assignment parameters
@@ -219,7 +198,7 @@ func (rg *resourceGroupBuilder) Grant(ctx context.Context, principal *v2.Resourc
 	// Create the role assignment
 	// In azure, you do not directly add users to resource groups. Instead, you assigned roles
 	// to users for the resource group, which gives them specific permissions.
-	resp, err := client.Create(ctx, scope, roleAssignmentId, parameters, nil)
+	resp, err := roleAssignmentsClient.Create(ctx, scope, roleAssignmentId, parameters, nil)
 	if err != nil {
 		return nil, err
 	}

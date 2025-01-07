@@ -147,6 +147,35 @@ func TestRoleGrants(t *testing.T) {
 	require.Nil(t, err)
 }
 
+func TestResourceGroupGrants(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	r := &resourceGroupBuilder{
+		conn: &connTest,
+	}
+	lstResourceGroups, err := getResourceGroups(ctxTest, &connTest)
+	require.Nil(t, err)
+
+	for _, rg := range lstResourceGroups {
+		gr, err := resourceGroupResource(ctxTest,
+			subscriptionIDForTesting,
+			"11102f94-c441-49e6-a78b-ef80e0188abc",
+			&armresources.ResourceGroup{
+				ID:   &rg,
+				Name: &rg,
+			}, nil)
+		require.Nil(t, err)
+
+		_, _, _, err = r.Grants(ctxTest, gr, nil)
+		require.Nil(t, err)
+	}
+}
+
 func TestSubscriptionGrants(t *testing.T) {
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
 		t.Skip()
@@ -198,7 +227,7 @@ func getRoleForTesting(ctxTest context.Context, subscriptionId, roleId, name, de
 
 func getResourceGroupForTesting(ctxTest context.Context, subscriptionId, roleId, name, description string) (*v2.Resource, error) {
 	strRoleId := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
-	return resourceGroupResource(ctxTest, subscriptionId, &armresources.ResourceGroup{
+	return resourceGroupResource(ctxTest, subscriptionId, roleId, &armresources.ResourceGroup{
 		ID:   &strRoleId,
 		Name: &name,
 	}, nil)
@@ -224,7 +253,7 @@ func TestRoleGrant(t *testing.T) {
 	require.Nil(t, err)
 
 	// role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
-	grantEntitlement := "role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned"
+	grantEntitlement := "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned"
 	grantPrincipalType := "user"
 	grantPrincipal := grantPrincipalForTesting
 	_, data, err := parseEntitlementID(grantEntitlement)
@@ -276,40 +305,6 @@ func TestRoleRevoke(t *testing.T) {
 	require.Nil(t, err)
 }
 
-func TestB2(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.Nil(t, err)
-
-	subscriptionID := subscriptionIDForTesting // Replace with your subscription ID
-	principalID := "test_resource_group"       // Replace with the Principal ID you're searching for
-
-	// Create a Resource client
-	clientFactory, err := armresources.NewClientFactory(subscriptionID, connTest.token, nil)
-	require.Nil(t, err)
-
-	resourceClient := clientFactory.NewResourceGroupsClient()
-	// resourceClient := clientFactory.NewResourcesClient()
-
-	// List resources and search for the matching Principal ID
-	pager := resourceClient.NewListPager(nil)
-	ctx := context.Background()
-
-	for pager.More() {
-		page, err := pager.NextPage(ctx)
-		require.Nil(t, err)
-
-		for _, resource := range page.Value {
-			if strings.Contains(*resource.ID, principalID) {
-				log.Println("ok")
-			}
-		}
-	}
-}
-
 func TestListingResourceGroupContent(t *testing.T) {
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
 		t.Skip()
@@ -319,14 +314,8 @@ func TestListingResourceGroupContent(t *testing.T) {
 	require.Nil(t, err)
 
 	// Define variables
-	resourceGroupName := "test_2_resource_group"
+	resourceGroupName := "test_resource_group"
 	subscriptionID := "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
-
-	// Authenticate with Azure
-	// cred, err := azidentity.NewDefaultAzureCredential(nil)
-	// if err != nil {
-	// 	log.Fatalf("Failed to get credentials: %v", err)
-	// }
 
 	// Create a Resources client
 	client, err := armresources.NewClient(subscriptionID, connTest.token, nil)
@@ -364,47 +353,6 @@ func TestGetPrincipalType(t *testing.T) {
 	require.Nil(t, err)
 }
 
-func TestList(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	// Authenticate with Microsoft Graph
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.Nil(t, err)
-
-	// Azure details
-	subscriptionID := "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
-	resourceGroupName := "test_2_resource_group"
-
-	// Create a Role Assignments Client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, connTest.token, nil)
-	require.Nil(t, err)
-
-	// Define the resource group scope
-	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, resourceGroupName)
-
-	// List role assignments for the resource group
-	pager := roleAssignmentsClient.NewListForScopePager(scope, nil)
-
-	// Iterate through the role assignments
-	log.Printf("Role Assignments for Resource Group: %s\n", resourceGroupName)
-	for pager.More() {
-		page, err := pager.NextPage(context.Background())
-		require.Nil(t, err)
-
-		for _, assignment := range page.Value {
-			log.Printf("Role Assignment ID: %s\n", *assignment.ID)
-			log.Printf("Principal ID: %s\n", *assignment.Properties.PrincipalID)
-			log.Printf("Role Definition ID: %s\n", *assignment.Properties.RoleDefinitionID)
-			log.Printf("Scope: %s\n", *assignment.Properties.Scope)
-			log.Println("---")
-			roleID := getRoleId(assignment.Properties.RoleDefinitionID)
-			log.Println(roleID)
-		}
-	}
-}
-
 func TestListAllRoles(t *testing.T) {
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
 		t.Skip()
@@ -414,11 +362,11 @@ func TestListAllRoles(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	_, err = getAllRoles(ctxTest, &connTest)
+	_, err = getAllRoles(ctxTest, &connTest, "")
 	require.Nil(t, err)
 }
 
-func TestResourceGrantGrant(t *testing.T) {
+func TestResourceGroupGrant(t *testing.T) {
 	var roleEntitlement string
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
 		t.Skip()

@@ -126,7 +126,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 				continue
 			}
 
-			principalId = getPrincipalResourceType(principalType, assignment)
+			principalId = getPrincipalIDResource(principalType, assignment)
 			// roleDefinitionID := assignment.Properties.RoleDefinitionID
 			// roleID = resourceGroupName + ":" + getRoleIdForResourceGroup(roleDefinitionID)
 			roleID = resource.Id.Resource
@@ -247,6 +247,7 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionId)
 	// Full resource ID of the role assignment to delete
 	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleID)
+	// roleAssignmentID := "/subscriptions/39ea64c5-86d5-4c29-8199-5b602c90e1c5/providers/Microsoft.Authorization/roleAssignments/3c2c3203-3353-4a67-9705-6fe990064677"
 	roleAssignmentID := roleDefinitionID
 	// Create a RoleAssignmentsClient
 	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, nil)
@@ -256,7 +257,6 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 
 	// Prepare role assignment parameters
 	parameters := armauthorization.RoleAssignmentsClientDeleteOptions{}
-
 	// Delete the role assignment
 	_, err = roleAssignmentsClient.Delete(ctx, scope, roleAssignmentID, &parameters)
 	if err != nil {

@@ -417,8 +417,12 @@ func tenantResource(ctx context.Context, t *armsubscription.TenantIDDescription)
 	return resource, nil
 }
 
+func getResourceGroupID(name, subscriptionID, roleID string) string {
+	return (name + ":" + subscriptionID + ":" + roleID)
+}
+
 // https://learn.microsoft.com/es-es/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
-func resourceGroupResource(ctx context.Context, subscriptionID string, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func resourceGroupResource(ctx context.Context, subscriptionID, roleID string, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var opts []rs.ResourceOption
 	profile := map[string]interface{}{
 		"id":       StringValue(rg.ID),
@@ -435,7 +439,11 @@ func resourceGroupResource(ctx context.Context, subscriptionID string, rg *armre
 	resource, err := rs.NewResource(
 		StringValue(rg.Name),
 		resourceGroupResourceType,
-		StringValue(rg.Name)+":"+subscriptionID,
+		getResourceGroupID(
+			StringValue(rg.Name),
+			subscriptionID,
+			roleID,
+		),
 		opts...,
 	)
 	if err != nil {
@@ -640,44 +648,34 @@ func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, p
 	return ret, nil
 }
 
-func getAllRoles(ctx context.Context, conn *Connector) ([]string, error) {
+func getAllRoles(ctx context.Context, conn *Connector, subscriptionID string) ([]string, error) {
 	lstRoles := []string{}
-	pagerSubscription := conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
-	for pagerSubscription.More() {
-		page, err := pagerSubscription.NextPage(ctx)
+	// Initialize the RoleDefinitionsClient
+	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(conn.token, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Define the scope (use "/" for subscription-level roles)
+	scope := fmt.Sprintf("/subscriptions/%s", subscriptionID)
+	// Get the list of role definitions
+	pagerRoles := roleDefinitionsClient.NewListPager(scope, nil)
+	for pagerRoles.More() {
+		resp, err := pagerRoles.NextPage(ctx)
 		if err != nil {
 			return nil, err
 		}
 
-		for _, subscription := range page.Value {
-			// Initialize the RoleDefinitionsClient
-			client, err := armauthorization.NewRoleDefinitionsClient(conn.token, nil)
-			if err != nil {
-				return nil, err
-			}
-
-			// Define the scope (use "/" for subscription-level roles)
-			scope := fmt.Sprintf("/subscriptions/%s", *subscription.SubscriptionID)
-			// Get the list of role definitions
-			pager := client.NewListPager(scope, nil)
-			for pager.More() {
-				resp, err := pager.NextPage(ctx)
-				if err != nil {
-					return nil, err
-				}
-
-				// Iterate over role definitions
-				for _, role := range resp.Value {
-					lstRoles = append(lstRoles, *role.Name)
-				}
-			}
+		// Iterate over role definitions
+		for _, role := range resp.Value {
+			lstRoles = append(lstRoles, *role.Name)
 		}
 	}
 
 	return lstRoles, nil
 }
 
-func getPrincipalResourceType(principalType string, assignment *armauthorization.RoleAssignment) *v2.ResourceId {
+func getPrincipalIDResource(principalType string, assignment *armauthorization.RoleAssignment) *v2.ResourceId {
 	var principalId *v2.ResourceId
 	switch principalType {
 	case "#microsoft.graph.user":
@@ -702,4 +700,35 @@ func getPrincipalResourceType(principalType string, assignment *armauthorization
 		}
 	}
 	return principalId
+}
+
+func getResourceGroups(ctx context.Context, conn *Connector) ([]string, error) {
+	lstResourceGroups := []string{}
+	pagerSubscriptions := conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
+	for pagerSubscriptions.More() {
+		page, err := pagerSubscriptions.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, subscription := range page.Value {
+			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, conn.token, nil)
+			if err != nil {
+				return nil, err
+			}
+
+			for pager := client.NewListPager(nil); pager.More(); {
+				page, err := pager.NextPage(ctx)
+				if err != nil {
+					return nil, err
+				}
+
+				for _, groupList := range page.Value {
+					lstResourceGroups = append(lstResourceGroups, *groupList.Name)
+				}
+			}
+		}
+	}
+
+	return lstResourceGroups, nil
 }
