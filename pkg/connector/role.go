@@ -221,19 +221,25 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	principalID := principal.Id.Resource
 	entitlementResource := entitlement.Resource.Id.Resource
 	if !strings.Contains(entitlementResource, ":") {
-		return nil, fmt.Errorf("invalid role id")
+		return nil, fmt.Errorf("%s", invalidRoleID)
 	}
 
 	entitlementIDs := strings.Split(entitlement.Resource.Id.Resource, ":")
-	if len(entitlementIDs) != 3 {
-		return nil, fmt.Errorf("invalid role id")
+	if len(entitlementIDs) != 2 {
+		return nil, fmt.Errorf("%s", invalidRoleID)
 	}
 
+	roleID := entitlementIDs[0]
 	subscriptionId := entitlementIDs[1]
-	roleID := entitlementIDs[2]
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionId)
-	// Full resource ID of the role assignment to delete
-	roleAssignmentID, err := getRoleAssignmentID(ctx, r.conn, subscriptionId, roleID, principalID)
+	// role assignment to delete
+	roleAssignmentName, err := getRoleAssignmentID(ctx,
+		r.conn,
+		scope,
+		subscriptionId,
+		roleID,
+		principalID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -247,13 +253,14 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	// Prepare role assignment parameters
 	parameters := armauthorization.RoleAssignmentsClientDeleteOptions{}
 	// Delete the role assignment
-	_, err = roleAssignmentsClient.Delete(ctx, scope, roleAssignmentID, &parameters)
+	roleAssignmentResponse, err := roleAssignmentsClient.Delete(ctx, scope, roleAssignmentName, &parameters)
 	if err != nil {
 		return nil, err
 	}
 
 	l.Warn("Role assignment successfully revoked.",
-		zap.String("roleAssignmentID", roleAssignmentID),
+		zap.String("roleAssignmentID", roleAssignmentName),
+		zap.String("ID", *roleAssignmentResponse.ID),
 	)
 
 	return nil, nil

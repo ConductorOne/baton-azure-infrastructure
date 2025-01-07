@@ -791,18 +791,15 @@ func getResourceGroupRoleAssignmentID(ctx context.Context, conn *Connector, subs
 	return "", nil
 }
 
-func getRoleAssignmentID(ctx context.Context, conn *Connector, subscriptionID, roleId, principalID string) (string, error) {
+func getRoleAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID, roleId, principalID string) (string, error) {
 	// Create a Role Assignments Client
 	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, conn.token, nil)
 	if err != nil {
 		return "", err
 	}
 
-	// Define the scope
-	scope := "/"
 	// List role assignments for the resource group
 	pagerResourceGroup := roleAssignmentsClient.NewListForScopePager(scope, nil)
-
 	// Iterate through the role assignments
 	for pagerResourceGroup.More() {
 		page, err := pagerResourceGroup.NextPage(ctx)
@@ -812,12 +809,12 @@ func getRoleAssignmentID(ctx context.Context, conn *Connector, subscriptionID, r
 
 		for _, assignment := range page.Value {
 			roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionID, roleId)
-			if *assignment.Properties.PrincipalID != principalID &&
-				assignment.Properties.RoleDefinitionID != &roleDefinitionID {
-				return *assignment.ID, nil
+			if *assignment.Properties.PrincipalID == principalID &&
+				*assignment.Properties.RoleDefinitionID == roleDefinitionID {
+				return *assignment.Name, nil
 			}
 		}
 	}
 
-	return "", nil
+	return "", fmt.Errorf("RoleAssignmentID not found")
 }

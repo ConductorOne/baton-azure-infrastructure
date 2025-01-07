@@ -306,7 +306,10 @@ func TestRoleGrant(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	// role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
+	// ________________________________________________________________
+	// | resource-name | resource-id | subscription-id | entitlement |
+	// ----------------------------------------------------------------
+	// role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned
 	grantEntitlement := "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned"
 	grantPrincipalType := "user"
 	grantPrincipal := grantPrincipalForTesting
@@ -339,6 +342,9 @@ func TestRoleRevoke(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
+	// ________________________________________________________________________________________________
+	// | resource-name | resource-id | subscription-id | entitlement | principal-type | principal-id |
+	// ------------------------------------------------------------------------------------------------
 	// role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
 	revokeGrant := "role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a"
 	data := strings.Split(revokeGrant, ":")
