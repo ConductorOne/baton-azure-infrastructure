@@ -2,9 +2,12 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -205,7 +208,22 @@ func (ra *roleAssignmentResourceGroupBuilder) Grant(ctx context.Context, princip
 	// to users for the resource group, which gives them specific permissions.
 	resp, err := roleAssignmentsClient.Create(ctx, scope, roleAssignmentId, parameters, nil)
 	if err != nil {
-		return nil, err
+		var azureErr *azcore.ResponseError
+		switch {
+		case errors.As(err, &azureErr):
+			if azureErr.StatusCode == http.StatusConflict {
+				l.Warn(
+					"azure-infrastructure-connector: failed to perform request",
+					zap.Int("StatusCode", azureErr.StatusCode),
+					zap.String("ErrorCode", azureErr.ErrorCode),
+					zap.String("ErrorMsg", azureErr.Error()),
+				)
+
+				return annotations.New(&v2.GrantAlreadyExists{}), nil
+			}
+		default:
+			return nil, err
+		}
 	}
 
 	l.Warn("Role membership has been created.",

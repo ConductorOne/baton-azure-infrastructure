@@ -72,7 +72,7 @@ jobs:
           BATON_AZURE_CLIENT_ID: ${{ secrets.BATON_AZURE_CLIENT_ID }}
           BATON_AZURE_CLIENT_SECRET: ${{ secrets.BATON_AZURE_CLIENT_SECRET }}
           BATON_AZURE_TENANT_ID: ${{ secrets.BATON_AZURE_TENANT_ID }}
-          BATON_ENTITLEMENT: "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned"
-          BATON_PRINCIPAL: "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+          BATON_ENTITLEMENT: "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned"
           BATON_PRINCIPAL_TYPE: "user"
+          BATON_PRINCIPAL: "e4e9c5ae-2937-408b-ba3c-0f58cf417f0a"
         run: ./test/grant-revoke.sh

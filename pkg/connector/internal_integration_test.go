@@ -275,14 +275,14 @@ func getRoleForTesting(ctxTest context.Context, subscriptionId, roleId, name, de
 	}, nil)
 }
 
-func getRoleAssignmentResourceGroupForTesting(ctxTest context.Context, subscriptionId, roleId, name, description string) (*v2.Resource, error) {
+func getRoleAssignmentResourceGroupForTesting(ctxTest context.Context, subscriptionId, roleId, resourceGroupName, description string) (*v2.Resource, error) {
 	strRoleId := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
 	return roleAssignmentResourceGroupResource(ctxTest,
 		subscriptionId,
 		roleId,
 		&armresources.ResourceGroup{
 			ID:   &strRoleId,
-			Name: &name,
+			Name: &resourceGroupName,
 		}, nil)
 }
 
@@ -345,7 +345,7 @@ func TestRoleRevoke(t *testing.T) {
 	// | resource-name | resource-id | subscription-id | entitlement | principal-type | principal-id |
 	// ------------------------------------------------------------------------------------------------
 	// role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
-	revokeGrant := "role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+	revokeGrant := "role:312a565d-c81f-4fd8-895a-4e21e48d571c:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a"
 	data := strings.Split(revokeGrant, ":")
 	principalID := &v2.ResourceId{ResourceType: userResourceType.Id, Resource: "72af6288-7040-49ca-a2f0-51ce6ba5a78a"}
 	resource, err := getRoleForTesting(ctxTest, data[2], data[1], "AcrDelete", "testing role")
@@ -404,13 +404,18 @@ func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
 	// resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned
 	grantEntitlement := "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned"
 	grantPrincipalType := "user"
-	grantPrincipal := "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
-	_, data, err := parseRoleAssignmentEntitlementID(grantEntitlement)
+	grantPrincipal := "e4e9c5ae-2937-408b-ba3c-0f58cf417f0a"
+	_, grantEntitlementIDs, err := parseRoleAssignmentEntitlementID(grantEntitlement)
 	require.Nil(t, err)
-	require.NotNil(t, data)
+	require.NotNil(t, grantEntitlementIDs)
 
-	roleEntitlement := data[4]
-	resource, err := getRoleAssignmentResourceGroupForTesting(ctxTest, data[2], data[3], "test_resource_group", "testing role")
+	roleEntitlement := grantEntitlementIDs[4]
+	resource, err := getRoleAssignmentResourceGroupForTesting(ctxTest,
+		grantEntitlementIDs[2],
+		grantEntitlementIDs[3],
+		grantEntitlementIDs[1],
+		"testing role",
+	)
 	require.Nil(t, err)
 
 	entitlement := getEntitlementForTesting(resource, grantPrincipalType, roleEntitlement)
@@ -437,11 +442,16 @@ func TestRoleAssignmentResourceGroupRevoke(t *testing.T) {
 	// -----------------------------------------------------------------------------------------------------------
 	// resource-name | resource-id | subscription-id | role-id | roleEntitlement | principal-type | principal-id
 	// -----------------------------------------------------------------------------------------------------------
-	// resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
-	revokeGrant := "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a "
-	data := strings.Split(revokeGrant, ":")
-	principalID := &v2.ResourceId{ResourceType: userResourceType.Id, Resource: "72af6288-7040-49ca-a2f0-51ce6ba5a78a"}
-	resource, err := getRoleAssignmentResourceGroupForTesting(ctxTest, data[2], data[3], data[1], "testing role")
+	// resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:e4e9c5ae-2937-408b-ba3c-0f58cf417f0a
+	revokeGrant := "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:e4e9c5ae-2937-408b-ba3c-0f58cf417f0a"
+	revokeGrantIDs := strings.Split(revokeGrant, ":")
+	principalID := &v2.ResourceId{ResourceType: userResourceType.Id, Resource: revokeGrantIDs[6]}
+	resource, err := getRoleAssignmentResourceGroupForTesting(ctxTest,
+		revokeGrantIDs[2],
+		revokeGrantIDs[3],
+		revokeGrantIDs[1],
+		"testing role",
+	)
 	require.Nil(t, err)
 
 	gr := grant.NewGrant(resource, typeAssigned, principalID)
@@ -449,7 +459,7 @@ func TestRoleAssignmentResourceGroupRevoke(t *testing.T) {
 	gr.Annotations = annos
 	require.NotNil(t, gr)
 
-	// --revoke-grant "role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+	// --revoke-grant "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:e4e9c5ae-2937-408b-ba3c-0f58cf417f0a"
 	l := &roleAssignmentResourceGroupBuilder{
 		conn: &connTest,
 	}
