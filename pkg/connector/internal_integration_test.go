@@ -459,7 +459,6 @@ func TestRoleAssignmentResourceGroupRevoke(t *testing.T) {
 	gr.Annotations = annos
 	require.NotNil(t, gr)
 
-	// --revoke-grant "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:e4e9c5ae-2937-408b-ba3c-0f58cf417f0a"
 	l := &roleAssignmentResourceGroupBuilder{
 		conn: &connTest,
 	}
