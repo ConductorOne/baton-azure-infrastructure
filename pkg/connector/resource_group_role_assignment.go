@@ -274,12 +274,14 @@ func (ra *roleAssignmentResourceGroupBuilder) Revoke(ctx context.Context, grant 
 		return nil, err
 	}
 
-	if roleAssignmentDeleteResponse.ID != nil {
-		l.Warn("Role assignment successfully revoked.",
-			zap.String("roleAssignmentID", roleAssignmentName),
-			zap.String("ID", *roleAssignmentDeleteResponse.ID),
-		)
+	if roleAssignmentDeleteResponse.ID == nil {
+		return nil, fmt.Errorf("failed to revoke role assignment %s scope: %s", roleID, scope)
 	}
+
+	l.Warn("Role assignment successfully revoked.",
+		zap.String("roleAssignmentID", roleAssignmentName),
+		zap.String("ID", *roleAssignmentDeleteResponse.ID),
+	)
 
 	return nil, nil
 }

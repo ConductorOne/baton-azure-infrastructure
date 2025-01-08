@@ -229,6 +229,7 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 		return nil, fmt.Errorf("%s", invalidRoleID)
 	}
 
+	// Prepare role assignment parameters
 	roleID := entitlementIDs[0]
 	subscriptionId := entitlementIDs[1]
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionId)
@@ -250,20 +251,20 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 		return nil, err
 	}
 
-	// Prepare role assignment parameters
-	parameters := armauthorization.RoleAssignmentsClientDeleteOptions{}
 	// Delete the role assignment
-	roleAssignmentResponse, err := roleAssignmentsClient.Delete(ctx, scope, roleAssignmentName, &parameters)
+	roleAssignmentResponse, err := roleAssignmentsClient.Delete(ctx, scope, roleAssignmentName, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	if roleAssignmentResponse.ID != nil {
-		l.Warn("Role assignment successfully revoked.",
-			zap.String("roleAssignmentID", roleAssignmentName),
-			zap.String("ID", *roleAssignmentResponse.ID),
-		)
+	if roleAssignmentResponse.ID == nil {
+		return nil, fmt.Errorf("failed to revoke role assignment %s scope: %s", roleID, scope)
 	}
+
+	l.Warn("Role assignment successfully revoked.",
+		zap.String("roleAssignmentID", roleAssignmentName),
+		zap.String("ID", *roleAssignmentResponse.ID),
+	)
 
 	return nil, nil
 }
