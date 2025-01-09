@@ -41,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BATON_LOG_LEVEL: debug
+      BATON: ./baton/baton
       BATON_AZURE_CLIENT_ID: ${{ secrets.BATON_AZURE_CLIENT_ID }}
       BATON_AZURE_CLIENT_SECRET: ${{ secrets.BATON_AZURE_CLIENT_SECRET }}
       BATON_AZURE_TENANT_ID: ${{ secrets.BATON_AZURE_TENANT_ID }}
@@ -62,29 +63,40 @@ jobs:
           BATON_AZURE_CLIENT_SECRET: ${{ secrets.BATON_AZURE_CLIENT_SECRET }}
           BATON_AZURE_TENANT_ID: ${{ secrets.BATON_AZURE_TENANT_ID }}
         run: ./baton-azure-infrastructure
-      - name: Checkout baton
-        uses: actions/checkout@v4
-        with:
-          repository: ConductorOne/baton
-          ref: main
-          path: ./baton
-      - name: Build baton
-        working-directory: ./baton
-        run: go build ./cmd/baton
-      - name: Run baton-azure-infrastructure
-        run: ./baton-azure-infrastructure
-      - name: Check for grant before revoking
+      # - name: Checkout baton
+      #   uses: actions/checkout@v4
+      #   with:
+      #     repository: ConductorOne/baton
+      #     ref: main
+      #     path: ./baton
+      # - name: Build baton
+      #   working-directory: ./baton
+      #   run: go build ./cmd/baton
+
+      - name: Install baton
+        run: ./scripts/get-baton.sh && mv baton /usr/local/bin
+
+      # - name: Check for grant before revoking
+      #   run: |
+      #     ./baton-azure-infrastructure 
+      #     baton grants --entitlement="${{ env.BATON_ENTITLEMENT }}" --output-format=json | jq --exit-status 'if .grants then .grants | any(.principal.id.resource == "${{ env.BATON_PRINCIPAL }}") else . end'
+      # - name: Revoke grants
+      #   run: |
+      #     ./baton-azure-infrastructure  
+      #     ./baton-azure-infrastructure --revoke-grant ${{ env.BATON_GRANT }}
+      # - name: Check grant was revoked
+      #   run: |
+      #      ./baton-azure-infrastructure 
+      #      baton grants --entitlement="${{ env.BATON_ENTITLEMENT }}" --output-format=json | jq --exit-status "if .grants then .grants[]?.principal.id.resource != \"${{ env.BATON_PRINCIPAL }}\" else . end"
+
+      - name: Grant entitlement
+        run: | 
+          ./baton-azure-infrastructure
+          ./baton-azure-infrastructure--grant-entitlement ${{ env.BATON_ENTITLEMENT }} --grant-principal-type ${{ env.BATON_PRINCIPAL_TYPE }} --grant-principal ${{ env.BATON_PRINCIPAL }}  --provisioning
+      - name: Check grant was re-granted
         run: |
-          ./baton-azure-infrastructure 
-          baton grants --entitlement="${{ env.BATON_ENTITLEMENT }}" --output-format=json | jq --exit-status 'if .grants then .grants | any(.principal.id.resource == "${{ env.BATON_PRINCIPAL }}") else . end'
-      - name: Revoke grants
-        run: |
-          ./baton-azure-infrastructure  
-          ./baton-azure-infrastructure --revoke-grant ${{ env.BATON_GRANT }}
-      - name: Check grant was revoked
-        run: |
-           ./baton-azure-infrastructure 
-           baton grants --entitlement="${{ env.BATON_ENTITLEMENT }}" --output-format=json | jq --exit-status "if .grants then .grants[]?.principal.id.resource != \"${{ env.BATON_PRINCIPAL }}\" else . end"
+          ./baton-azure-infrastructure
+          baton grants --entitlement ${{ env.BATON_ENTITLEMENT }} --output-format=json | jq -e ".grants | any(.principal.id.resource ==\"${{ env.BATON_PRINCIPAL }}\")"
 
       # - name: Test grant/revoking
       #   env:
