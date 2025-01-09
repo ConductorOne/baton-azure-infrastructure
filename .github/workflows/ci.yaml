@@ -88,7 +88,7 @@ jobs:
           baton grants --entitlement ${{ env.BATON_ENTITLEMENT }} --output-format=json | jq -e ".grants | any(.principal.id.resource ==\"${{ env.BATON_PRINCIPAL }}\")"
       - name: Test grant/revoking roles
         env:
-          BATON: ./baton
+          BATON: baton
           BATON_AZURE_INFRASTRUCTURE: ./baton-azure-infrastructure
           BATON_AZURE_CLIENT_ID: ${{ secrets.BATON_AZURE_CLIENT_ID }}
           BATON_AZURE_CLIENT_SECRET: ${{ secrets.BATON_AZURE_CLIENT_SECRET }}
