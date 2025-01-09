@@ -92,7 +92,7 @@ jobs:
       - name: Grant entitlement
         run: | 
           ./baton-azure-infrastructure
-          ./baton-azure-infrastructure--grant-entitlement ${{ env.BATON_ENTITLEMENT }} --grant-principal-type ${{ env.BATON_PRINCIPAL_TYPE }} --grant-principal ${{ env.BATON_PRINCIPAL }}  --provisioning
+          ./baton-azure-infrastructure --grant-entitlement ${{ env.BATON_ENTITLEMENT }} --grant-principal-type ${{ env.BATON_PRINCIPAL_TYPE }} --grant-principal ${{ env.BATON_PRINCIPAL }}  --provisioning
       - name: Check grant was re-granted
         run: |
           ./baton-azure-infrastructure
