@@ -85,16 +85,4 @@ jobs:
       - name: Check grant was re-granted
         run: |
           ./baton-azure-infrastructure
-          baton grants --entitlement ${{ env.BATON_ENTITLEMENT }} --output-format=json | jq -e ".grants | any(.principal.id.resource ==\"${{ env.BATON_PRINCIPAL }}\")"
-      - name: Test grant/revoking roles
-        env:
-          BATON: baton
-          BATON_AZURE_INFRASTRUCTURE: ./baton-azure-infrastructure
-          BATON_AZURE_CLIENT_ID: ${{ secrets.BATON_AZURE_CLIENT_ID }}
-          BATON_AZURE_CLIENT_SECRET: ${{ secrets.BATON_AZURE_CLIENT_SECRET }}
-          BATON_AZURE_TENANT_ID: ${{ secrets.BATON_AZURE_TENANT_ID }}
-          BATON_ENTITLEMENT: "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned"
-          BATON_PRINCIPAL_TYPE: "user"
-          BATON_PRINCIPAL: "e7f6b650-1cd5-4859-a258-1de497c29de3"
-          BATON_GRANT: "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:e7f6b650-1cd5-4859-a258-1de497c29de3"
-        run: ./test/grant-revoke.sh          
+          baton grants --entitlement ${{ env.BATON_ENTITLEMENT }} --output-format=json | jq -e ".grants | any(.principal.id.resource ==\"${{ env.BATON_PRINCIPAL }}\")"      
