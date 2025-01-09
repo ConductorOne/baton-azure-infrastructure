@@ -219,21 +219,23 @@ func (ra *roleAssignmentResourceGroupBuilder) Grant(ctx context.Context, princip
 					zap.String("ErrorMsg", azureErr.Error()),
 				)
 
-				return annotations.New(&v2.GrantAlreadyExists{}), nil
+				// return annotations.New(&v2.GrantAlreadyExists{}), nil
 			}
 		default:
 			return nil, err
 		}
 	}
 
-	l.Warn("Role membership has been created.",
-		zap.String("ID", *resp.ID),
-		zap.String("Type", *resp.Type),
-		zap.String("Name", *resp.Name),
-		zap.String("PrincipalID", *resp.Properties.PrincipalID),
-		zap.String("RoleDefinitionID", *resp.Properties.RoleDefinitionID),
-		zap.String("RoleDefinitionID", *resp.Properties.Scope),
-	)
+	if resp.ID != nil {
+		l.Warn("Role membership has been created.",
+			zap.String("ID", *resp.ID),
+			zap.String("Type", *resp.Type),
+			zap.String("Name", *resp.Name),
+			zap.String("PrincipalID", *resp.Properties.PrincipalID),
+			zap.String("RoleDefinitionID", *resp.Properties.RoleDefinitionID),
+			zap.String("RoleDefinitionID", *resp.Properties.Scope),
+		)
+	}
 
 	return nil, nil
 }
