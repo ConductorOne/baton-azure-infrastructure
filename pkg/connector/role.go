@@ -2,9 +2,12 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
+	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -190,17 +193,32 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	// to users for the resource group, which gives them specific permissions.
 	resp, err := roleAssignmentsClient.Create(ctx, scope, roleAssignmentId, parameters, nil)
 	if err != nil {
-		return nil, err
+		var azureErr *azcore.ResponseError
+		switch {
+		case errors.As(err, &azureErr):
+			if azureErr.StatusCode == http.StatusConflict {
+				l.Warn(
+					"azure-infrastructure-connector: failed to perform request",
+					zap.Int("StatusCode", azureErr.StatusCode),
+					zap.String("ErrorCode", azureErr.ErrorCode),
+					zap.String("ErrorMsg", azureErr.Error()),
+				)
+			}
+		default:
+			return nil, err
+		}
 	}
 
-	l.Warn("Role membership has been created.",
-		zap.String("ID", *resp.ID),
-		zap.String("Type", *resp.Type),
-		zap.String("Name", *resp.Name),
-		zap.String("PrincipalID", *resp.Properties.PrincipalID),
-		zap.String("RoleDefinitionID", *resp.Properties.RoleDefinitionID),
-		zap.String("RoleDefinitionID", *resp.Properties.Scope),
-	)
+	if resp.ID != nil {
+		l.Warn("Role membership has been created.",
+			zap.String("ID", *resp.ID),
+			zap.String("Type", *resp.Type),
+			zap.String("Name", *resp.Name),
+			zap.String("PrincipalID", *resp.Properties.PrincipalID),
+			zap.String("RoleDefinitionID", *resp.Properties.RoleDefinitionID),
+			zap.String("RoleDefinitionID", *resp.Properties.Scope),
+		)
+	}
 
 	return nil, nil
 }

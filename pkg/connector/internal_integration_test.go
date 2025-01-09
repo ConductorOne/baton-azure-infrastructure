@@ -19,13 +19,14 @@ import (
 )
 
 var (
-	azureClientId            = os.Getenv("BATON_AZURE_CLIENT_ID")
-	azureClientSecret        = os.Getenv("BATON_AZURE_CLIENT_SECRET")
-	azureTenantId            = os.Getenv("BATON_AZURE_TENANT_ID")
-	ctxTest                  = context.Background()
-	grantPrincipalForTesting = "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
-	roleForTesting           = "11102f94-c441-49e6-a78b-ef80e0188abc"
-	subscriptionIDForTesting = "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
+	azureClientId              = os.Getenv("BATON_AZURE_CLIENT_ID")
+	azureClientSecret          = os.Getenv("BATON_AZURE_CLIENT_SECRET")
+	azureTenantId              = os.Getenv("BATON_AZURE_TENANT_ID")
+	ctxTest                    = context.Background()
+	grantPrincipalForTesting   = "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+	grantPrincipalForTestingV2 = "e7f6b650-1cd5-4859-a258-1de497c29de3"
+	roleForTesting             = "11102f94-c441-49e6-a78b-ef80e0188abc"
+	subscriptionIDForTesting   = "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
 )
 
 func TestUserBuilderList(t *testing.T) {
@@ -311,13 +312,18 @@ func TestRoleGrant(t *testing.T) {
 	// role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned
 	grantEntitlement := "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned"
 	grantPrincipalType := "user"
-	grantPrincipal := grantPrincipalForTesting
-	_, data, err := parseEntitlementID(grantEntitlement)
+	grantPrincipal := grantPrincipalForTestingV2
+	_, grantEntitlementIDs, err := parseEntitlementID(grantEntitlement)
 	require.Nil(t, err)
-	require.NotNil(t, data)
+	require.NotNil(t, grantEntitlementIDs)
 
-	roleEntitlement = data[3]
-	resource, err := getRoleForTesting(ctxTest, data[2], data[1], "AcrDelete", "testing role")
+	roleEntitlement = grantEntitlementIDs[3]
+	resource, err := getRoleForTesting(ctxTest,
+		grantEntitlementIDs[2],
+		grantEntitlementIDs[1],
+		"AcrDelete",
+		"testing role",
+	)
 	require.Nil(t, err)
 
 	entitlement := getEntitlementForTesting(resource, grantPrincipalType, roleEntitlement)
@@ -344,11 +350,16 @@ func TestRoleRevoke(t *testing.T) {
 	// ________________________________________________________________________________________________
 	// | resource-name | resource-id | subscription-id | entitlement | principal-type | principal-id |
 	// ------------------------------------------------------------------------------------------------
-	// role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a
-	revokeGrant := "role:312a565d-c81f-4fd8-895a-4e21e48d571c:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a"
-	data := strings.Split(revokeGrant, ":")
-	principalID := &v2.ResourceId{ResourceType: userResourceType.Id, Resource: "72af6288-7040-49ca-a2f0-51ce6ba5a78a"}
-	resource, err := getRoleForTesting(ctxTest, data[2], data[1], "AcrDelete", "testing role")
+	// role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:e7f6b650-1cd5-4859-a258-1de497c29de3
+	revokeGrant := "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:e7f6b650-1cd5-4859-a258-1de497c29de3"
+	revokeGrantIDs := strings.Split(revokeGrant, ":")
+	principalID := &v2.ResourceId{ResourceType: userResourceType.Id, Resource: revokeGrantIDs[5]}
+	resource, err := getRoleForTesting(ctxTest,
+		revokeGrantIDs[2],
+		revokeGrantIDs[1],
+		"AcrDelete",
+		"testing role",
+	)
 	require.Nil(t, err)
 
 	gr := grant.NewGrant(resource, typeAssigned, principalID)
@@ -356,37 +367,10 @@ func TestRoleRevoke(t *testing.T) {
 	gr.Annotations = annos
 	require.NotNil(t, gr)
 
-	// --revoke-grant "role:c2f4ef07-c644-48eb-af81-4b1b4947fb11:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:72af6288-7040-49ca-a2f0-51ce6ba5a78a"
 	l := &roleBuilder{
 		conn: &connTest,
 	}
 	_, err = l.Revoke(ctxTest, gr)
-	require.Nil(t, err)
-}
-
-func TestGetPrincipalType(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	// Authenticate with Microsoft Graph
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.Nil(t, err)
-
-	principalID := grantPrincipalForTesting
-	_, err = getPrincipalType(ctxTest, &connTest, principalID)
-	require.Nil(t, err)
-}
-
-func TestListAllRoles(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.Nil(t, err)
-
-	_, err = getAllRoles(ctxTest, &connTest, "")
 	require.Nil(t, err)
 }
 
@@ -494,4 +478,30 @@ func TestResourceGroupEntitlements(t *testing.T) {
 		_, _, _, err = rg.Entitlements(ctxTest, rs, nil)
 		require.Nil(t, err)
 	}
+}
+
+func TestGetPrincipalType(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	// Authenticate with Microsoft Graph
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	principalID := grantPrincipalForTesting
+	_, err = getPrincipalType(ctxTest, &connTest, principalID)
+	require.Nil(t, err)
+}
+
+func TestListAllRoles(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	_, err = getAllRoles(ctxTest, &connTest, "")
+	require.Nil(t, err)
 }

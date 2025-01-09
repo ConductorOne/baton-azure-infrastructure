@@ -41,6 +41,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BATON_LOG_LEVEL: debug
+      BATON_AZURE_CLIENT_ID: ${{ secrets.BATON_AZURE_CLIENT_ID }}
+      BATON_AZURE_CLIENT_SECRET: ${{ secrets.BATON_AZURE_CLIENT_SECRET }}
+      BATON_AZURE_TENANT_ID: ${{ secrets.BATON_AZURE_TENANT_ID }}
+      BATON_ENTITLEMENT: "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned"
+      BATON_PRINCIPAL_TYPE: "user"
+      BATON_PRINCIPAL: "e4e9c5ae-2937-408b-ba3c-0f58cf417f0a"
     steps:
       - name: Install Go
         uses: actions/setup-go@v4
@@ -65,14 +71,29 @@ jobs:
       - name: Build baton
         working-directory: ./baton
         run: go build ./cmd/baton
-      - name: Test grant/revoking
-        env:
-          BATON: ./baton/baton
-          BATON_AZURE_INFRASTRUCTURE: ./baton-azure-infrastructure
-          BATON_AZURE_CLIENT_ID: ${{ secrets.BATON_AZURE_CLIENT_ID }}
-          BATON_AZURE_CLIENT_SECRET: ${{ secrets.BATON_AZURE_CLIENT_SECRET }}
-          BATON_AZURE_TENANT_ID: ${{ secrets.BATON_AZURE_TENANT_ID }}
-          BATON_ENTITLEMENT: "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned"
-          BATON_PRINCIPAL_TYPE: "user"
-          BATON_PRINCIPAL: "e4e9c5ae-2937-408b-ba3c-0f58cf417f0a"
-        run: ./test/grant-revoke.sh
+      - name: Run baton-azure-infrastructure
+        run: ./baton-azure-infrastructure
+      - name: Check for grant before revoking
+        run: |
+          ./baton-azure-infrastructure 
+          baton grants --entitlement="${{ env.BATON_ENTITLEMENT }}" --output-format=json | jq --exit-status 'if .grants then .grants | any(.principal.id.resource == "${{ env.BATON_PRINCIPAL }}") else . end'
+      - name: Revoke grants
+        run: |
+          ./baton-azure-infrastructure  
+          ./baton-azure-infrastructure --revoke-grant ${{ env.BATON_GRANT }}
+      - name: Check grant was revoked
+        run: |
+           ./baton-azure-infrastructure 
+           baton grants --entitlement="${{ env.BATON_ENTITLEMENT }}" --output-format=json | jq --exit-status "if .grants then .grants[]?.principal.id.resource != \"${{ env.BATON_PRINCIPAL }}\" else . end"
+
+      # - name: Test grant/revoking
+      #   env:
+      #     BATON: ./baton/baton
+      #     BATON_AZURE_INFRASTRUCTURE: ./baton-azure-infrastructure
+      #     BATON_AZURE_CLIENT_ID: ${{ secrets.BATON_AZURE_CLIENT_ID }}
+      #     BATON_AZURE_CLIENT_SECRET: ${{ secrets.BATON_AZURE_CLIENT_SECRET }}
+      #     BATON_AZURE_TENANT_ID: ${{ secrets.BATON_AZURE_TENANT_ID }}
+      #     BATON_ENTITLEMENT: "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned"
+      #     BATON_PRINCIPAL_TYPE: "user"
+      #     BATON_PRINCIPAL: "e4e9c5ae-2937-408b-ba3c-0f58cf417f0a"
+      #   run: ./test/grant-revoke.sh
