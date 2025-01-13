@@ -37,7 +37,44 @@ baton resources
 # Data Model
 
 `baton-azure-infrastructure` will pull down information about the following resources:
-- Users
+- Users (entra users)
+- Groups (entra groups)
+- Roles (azure roles)
+- Tenants (azure tenants)
+- Enterprice Applications (entra service principals)
+- Managed Identities (entra service principals)
+- Resource Groups (azure resource groups)
+
+We also introduced resource_group_role_assignment(resource group ID, subscription ID and role ID) for provisioning resource Groups.
+
+## Resourceset-bindings, custom roles and members(Users or Groups) usage:
+
+- Let's use some IDs for this example
+```
+Resource Group `test_resource_group`
+Subscription `39ea64c5-86d5-4c29-8199-5b602c90e1c5`
+Role `11102f94-c441-49e6-a78b-ef80e0188abc`
+Principal `e4e9c5ae-2937-408b-ba3c-0f58cf417f0a`
+```
+
+- Granting resource group roles for users.
+```
+BATON_AZURE_CLIENT_ID='client_Id' \
+BATON_AZURE_CLIENT_SECRET='clien_secret' \
+BATON_AZURE_TENANT_ID='tenant_Id' baton-azure-infrastructure \
+--grant-entitlement 'resource_group_role_assignment:test_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned' --grant-principal-type 'user' --grant-principal 'e4e9c5ae-2937-408b-ba3c-0f58cf417f0a' 
+```
+
+In the previous example we granted the custom role `cr0kuwv5507zJCtSy697` to user `00ujp5a9z0rMTsPRW697`.
+
+- Revoking resource group role grants
+```
+BATON_AZURE_CLIENT_ID='client_Id' \
+BATON_AZURE_CLIENT_SECRET='clien_secret' \
+BATON_AZURE_TENANT_ID='tenant_Id' baton-azure-infrastructure \
+--revoke-grant 'resource_group_role_assignment:test_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:e4e9c5ae-2937-408b-ba3c-0f58cf417f0a'
+
+```
 
 # Contributing, Support and Issues
 

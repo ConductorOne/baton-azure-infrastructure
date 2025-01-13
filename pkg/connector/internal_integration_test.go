@@ -3,12 +3,14 @@ package connector
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -383,7 +385,7 @@ func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
 	require.Nil(t, err)
 
 	// ---------------------------------------------------------------------------
-	// resource-name | resource-id | subscription-id | role-id | roleEntitlement |
+	// resource-name | resourceGroup-id | subscription-id | role-id | roleEntitlement |
 	// ---------------------------------------------------------------------------
 	// resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned
 	grantEntitlement := "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned"
@@ -424,7 +426,7 @@ func TestRoleAssignmentResourceGroupRevoke(t *testing.T) {
 	require.Nil(t, err)
 
 	// -----------------------------------------------------------------------------------------------------------
-	// resource-name | resource-id | subscription-id | role-id | roleEntitlement | principal-type | principal-id
+	// resource-name | resourceGroup-id | subscription-id | role-id | roleEntitlement | principal-type | principal-id
 	// -----------------------------------------------------------------------------------------------------------
 	// resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:e4e9c5ae-2937-408b-ba3c-0f58cf417f0a
 	revokeGrant := "resource_group_role_assignment:test_2_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned:user:e4e9c5ae-2937-408b-ba3c-0f58cf417f0a"
@@ -504,4 +506,31 @@ func TestListAllRoles(t *testing.T) {
 
 	_, err = getAllRoles(ctxTest, &connTest, "")
 	require.Nil(t, err)
+}
+
+func TestEnterpriseApplicationsGrants(t *testing.T) {
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip()
+	}
+
+	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	s := &enterpriseApplicationsBuilder{
+		conn: &connTest,
+	}
+	reqURL := connTest.buildURL("servicePrincipals", setEnterpriseApplicationsKeys())
+	resp := &servicePrincipalsList{}
+	err = connTest.query(ctxTest, graphReadScopes, http.MethodGet, reqURL, nil, resp)
+	require.Nil(t, err)
+
+	entApps, err := slices.ConvertErr(resp.Value, func(app *servicePrincipal) (*v2.Resource, error) {
+		return enterpriseApplicationResource(ctxTest, app, nil)
+	})
+	require.Nil(t, err)
+
+	for _, res := range entApps {
+		_, _, _, err = s.Grants(ctxTest, res, &pagination.Token{})
+		require.Nil(t, err)
+	}
 }
