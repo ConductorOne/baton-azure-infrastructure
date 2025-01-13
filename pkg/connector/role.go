@@ -43,7 +43,6 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 				return nil, "", nil, err
 			}
 
-			// Define the scope (use "/" for subscription-level roles)
 			scope := fmt.Sprintf("/subscriptions/%s", *subscription.SubscriptionID)
 			// Get the list of role definitions
 			pagerRoles := client.NewListPager(scope, nil)
@@ -99,7 +98,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 		principalId            *v2.ResourceId
 	)
 	arr := strings.Split(resource.Id.Resource, ":")
-	if len(arr) > 0 && len(arr) < 3 {
+	if len(arr) == 2 {
 		subscriptionID = arr[1]
 		roleID = arr[0]
 	}
@@ -133,7 +132,6 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 			}
 
 			principalId = getPrincipalIDResource(principalType, assignment)
-			roleID = resource.Id.Resource
 			gr = grant.NewGrant(resource, typeAssigned, principalId)
 			rv = append(rv, gr)
 		}
@@ -174,7 +172,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 		return nil, err
 	}
 
-	// Define your resource scope
+	// Define your scope
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionId)
 	// Define the details of the role assignment
 	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
@@ -189,8 +187,6 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	}
 
 	// Create the role assignment
-	// In azure, you do not directly add users to resource groups. Instead, you assigned roles
-	// to users for the resource group, which gives them specific permissions.
 	resp, err := roleAssignmentsClient.Create(ctx, scope, roleAssignmentId, parameters, nil)
 	if err != nil {
 		var azureErr *azcore.ResponseError

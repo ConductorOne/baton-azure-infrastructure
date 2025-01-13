@@ -164,12 +164,12 @@ func TestRoleGrants(t *testing.T) {
 	lstRoles, err := getAllRoles(ctxTest, &connTest, subscriptionIDForTesting)
 	require.Nil(t, err)
 
-	roleDefinitionID := fmt.Sprintf(
-		"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
-		subscriptionIDForTesting,
-		roleForTesting,
-	)
 	for _, rl := range lstRoles {
+		roleDefinitionID := fmt.Sprintf(
+			"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
+			subscriptionIDForTesting,
+			rl,
+		)
 		rs, err := roleResource(ctxTest, &armauthorization.RoleDefinition{
 			ID: &roleDefinitionID,
 			Properties: &armauthorization.RoleDefinitionProperties{

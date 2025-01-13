@@ -111,7 +111,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resour
 		subscriptionID, resourceGroupName, roleID string
 	)
 	arr := strings.Split(resource.Id.Resource, ":")
-	if len(arr) > 0 && len(arr) < 4 {
+	if len(arr) == 3 {
 		subscriptionID = arr[1]
 		resourceGroupName = arr[0]
 		roleID = arr[2]

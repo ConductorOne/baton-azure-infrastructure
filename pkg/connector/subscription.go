@@ -60,49 +60,6 @@ func (s *subscriptionBuilder) Entitlements(_ context.Context, resource *v2.Resou
 }
 
 func (s *subscriptionBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	// var (
-	// 	rv             []*v2.Grant
-	// 	gr             *v2.Grant
-	// 	roleID         string
-	// 	subscriptionID = resource.Id.Resource
-	// )
-	// // Create a new RoleAssignmentsClient
-	// roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, s.conn.token, nil)
-	// if err != nil {
-	// 	return nil, "", nil, err
-	// }
-
-	// // Iterate over all role assignments
-	// pager := roleAssignmentsClient.NewListPager(nil)
-	// for pager.More() {
-	// 	page, err := pager.NextPage(ctx)
-	// 	if err != nil {
-	// 		return nil, "", nil, err
-	// 	}
-
-	// 	for _, assignment := range page.Value {
-	// 		principalType, err := getPrincipalType(ctx, s.conn, *assignment.Properties.PrincipalID)
-	// 		if err != nil {
-	// 			continue
-	// 		}
-
-	// 		principalId := getPrincipalResourceType(principalType, assignment)
-	// 		roleDefinitionID := assignment.Properties.RoleDefinitionID
-	// 		roleID = getRoleId(roleDefinitionID)
-	// 		roleRes, err := rs.NewResource(
-	// 			*assignment.Name,
-	// 			roleResourceType,
-	// 			roleID,
-	// 		)
-	// 		if err != nil {
-	// 			return nil, "", nil, err
-	// 		}
-
-	// 		gr = grant.NewGrant(roleRes, typeAssigned, principalId)
-	// 		rv = append(rv, gr)
-	// 	}
-	// }
-
 	return nil, "", nil, nil
 }
 
