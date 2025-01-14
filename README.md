@@ -19,7 +19,7 @@ baton resources
 ## docker
 
 ```
-docker run --rm -v $(pwd):/out -e BATON_DOMAIN_URL=domain_url -e BATON_API_KEY=apiKey -e BATON_USERNAME=username ghcr.io/conductorone/baton-azure-infrastructure:latest -f "/out/sync.c1z"
+docker run --rm -v $(pwd):/out -e BATON_AZURE_CLIENT_ID=client_Id -e BATON_AZURE_CLIENT_SECRET=client_secret -e BATON_AZURE_TENANT_ID=tenant_Id ghcr.io/conductorone/baton-azure-infrastructure:latest -f "/out/sync.c1z"
 docker run --rm -v $(pwd):/out ghcr.io/conductorone/baton:latest -f "/out/sync.c1z" resources
 ```
 
@@ -31,6 +31,9 @@ go install github.com/conductorone/baton-azure-infrastructure/cmd/baton-azure-in
 
 baton-azure-infrastructure
 
+BATON_AZURE_CLIENT_SECRET=<client_secret>
+BATON_AZURE_CLIENT_ID=<client_id>
+BATON_AZURE_TENANT_ID=<tenant_id>
 baton resources
 ```
 
@@ -41,7 +44,7 @@ baton resources
 - Groups (entra groups)
 - Roles (azure roles)
 - Tenants (azure tenants)
-- Enterprice Applications (entra service principals)
+- Enterprise Applications (entra service principals)
 - Managed Identities (entra service principals)
 - Resource Groups (azure resource groups)
 
