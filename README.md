@@ -8,6 +8,8 @@ Check out [Baton](https://github.com/conductorone/baton) to learn more the proje
 
 # Getting Started
 
+You need a Microsoft tenant. You get one with an [Azure free trial](https://azure.microsoft.com/pricing/free-trial/). 
+
 ## brew
 
 ```
@@ -29,11 +31,11 @@ docker run --rm -v $(pwd):/out ghcr.io/conductorone/baton:latest -f "/out/sync.c
 go install github.com/conductorone/baton/cmd/baton@main
 go install github.com/conductorone/baton-azure-infrastructure/cmd/baton-azure-infrastructure@main
 
-baton-azure-infrastructure
-
 BATON_AZURE_CLIENT_SECRET=<client_secret>
 BATON_AZURE_CLIENT_ID=<client_id>
 BATON_AZURE_TENANT_ID=<tenant_id>
+baton-azure-infrastructure
+
 baton resources
 ```
 
