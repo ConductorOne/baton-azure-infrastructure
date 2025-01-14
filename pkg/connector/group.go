@@ -107,9 +107,9 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 		return nil, "", nil, err
 	}
 
-	// NOTE: We use the Beta URL here because in the v1.0 docs there is this note (last checked August 2023)
-	//
-	// Important
+	// NOTE: We use the Beta URL here because in the v1.0 docs there is this note (last checked December 2024)
+	// -----------------------------------------------------------------------------------------------
+	// *** Important ***
 	//
 	//   This API has a known issue where service principals are not listed as group
 	//   members in v1.0. Use this API on the beta endpoint instead or the
