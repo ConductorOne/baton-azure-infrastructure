@@ -683,7 +683,6 @@ func getAllRoles(ctx context.Context, conn *Connector, subscriptionID string) ([
 		return nil, err
 	}
 
-	// Define the scope (use "/" for subscription-level roles)
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionID)
 	// Get the list of role definitions
 	pagerRoles := roleDefinitionsClient.NewListPager(scope, nil)
@@ -760,14 +759,13 @@ func getResourceGroups(ctx context.Context, conn *Connector) ([]string, error) {
 	return lstResourceGroups, nil
 }
 
-func getResourceGroupRoleAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID, resourceGroupName, roleId, principalID string) (string, error) {
+func getAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID, roleId, principalID string) (string, error) {
 	// Create a Role Assignments Client
 	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, conn.token, nil)
 	if err != nil {
 		return "", err
 	}
 
-	// List role assignments for the resource group
 	pagerResourceGroup := roleAssignmentsClient.NewListForScopePager(scope, nil)
 	// Iterate through the role assignments
 	for pagerResourceGroup.More() {
@@ -777,35 +775,10 @@ func getResourceGroupRoleAssignmentID(ctx context.Context, conn *Connector, scop
 		}
 
 		for _, assignment := range page.Value {
-			roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionID, roleId)
-			if *assignment.Properties.PrincipalID == principalID &&
-				*assignment.Properties.RoleDefinitionID == roleDefinitionID {
-				return *assignment.Name, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("role assignment not found")
-}
-
-func getRoleAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID, roleId, principalID string) (string, error) {
-	// Create a Role Assignments Client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, conn.token, nil)
-	if err != nil {
-		return "", err
-	}
-
-	// List role assignments for the resource group
-	pagerResourceGroup := roleAssignmentsClient.NewListForScopePager(scope, nil)
-	// Iterate through the role assignments
-	for pagerResourceGroup.More() {
-		page, err := pagerResourceGroup.NextPage(ctx)
-		if err != nil {
-			return "", err
-		}
-
-		for _, assignment := range page.Value {
-			roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionID, roleId)
+			roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
+				subscriptionID,
+				roleId,
+			)
 			if *assignment.Properties.PrincipalID == principalID &&
 				*assignment.Properties.RoleDefinitionID == roleDefinitionID {
 				return *assignment.Name, nil

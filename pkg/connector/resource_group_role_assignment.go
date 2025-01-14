@@ -270,11 +270,10 @@ func (ra *roleAssignmentResourceGroupBuilder) Revoke(ctx context.Context, grant 
 	// Replace with your subscription ID and role assignment ID
 	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionId, resourceGroupID)
 	// role assignment to delete
-	roleAssignmentName, err := getResourceGroupRoleAssignmentID(ctx,
+	roleAssignmentName, err := getAssignmentID(ctx,
 		ra.conn,
 		scope,
 		subscriptionId,
-		resourceGroupID,
 		roleID,
 		principalID,
 	)

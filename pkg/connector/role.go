@@ -248,7 +248,7 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	subscriptionId := entitlementIDs[1]
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionId)
 	// role assignment to delete
-	roleAssignmentName, err := getRoleAssignmentID(ctx,
+	roleAssignmentName, err := getAssignmentID(ctx,
 		r.conn,
 		scope,
 		subscriptionId,
