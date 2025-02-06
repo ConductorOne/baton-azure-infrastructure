@@ -20,7 +20,8 @@ import (
 )
 
 type enterpriseApplicationsBuilder struct {
-	conn *Connector
+	conn  *Connector
+	cache map[string]*servicePrincipal
 }
 
 func (e *enterpriseApplicationsBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -35,13 +36,19 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 
 	reqURL := bag.PageToken()
 	if reqURL == "" {
-		reqURL = e.conn.buildURL("servicePrincipals", setEnterpriseApplicationsKeys())
+		urlValues := setEnterpriseApplicationsKeys()
+		urlValues.Set("$expand", "appRoleAssignedTo")
+		reqURL = e.conn.buildBetaURL("servicePrincipals", urlValues)
 	}
 
 	resp := &servicePrincipalsList{}
 	err = e.conn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
 		return nil, "", nil, err
+	}
+
+	for _, sp := range resp.Value {
+		e.cache[sp.ID] = sp
 	}
 
 	entApps, err := slices.ConvertErr(resp.Value, func(app *servicePrincipal) (*v2.Resource, error) {
@@ -98,16 +105,8 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 		},
 	}
 
-	v := url.Values{}
-	v.Set("$select", strings.Join(servicePrincipalSelect, ","))
-	reqURL := e.conn.buildURL(path.Join("servicePrincipals", resource.Id.Resource), v)
-	resp := &servicePrincipal{}
-	err := e.conn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	for _, appRole := range resp.AppRoles {
+	servicePrincipal := e.cache[resource.Id.Resource]
+	for _, appRole := range servicePrincipal.AppRoles {
 		usersAllowed := false
 		for _, memberType := range appRole.AllowedMemberTypes {
 			if memberType == "User" {
@@ -192,26 +191,8 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	ps := b.Current()
 	switch ps.ResourceTypeID {
 	case assignmentStr:
-		resp := &appRoleAssignmentList{}
-		err = e.conn.query(ctx, graphReadScopes, http.MethodGet, ps.Token, nil, resp)
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				ctxzap.Extract(ctx).Warn(
-					"app role assignment membership not found (underlying 404)",
-					zap.String("app_role_assignment_id", resource.Id.GetResource()),
-					zap.String("url", ps.Token),
-					zap.Error(err),
-				)
-				return nil, "", nil, nil
-			}
-			return nil, "", nil, err
-		}
-		pageToken, err := b.NextToken(resp.NextLink)
-		if err != nil {
-			return nil, "", nil, err
-		}
-
-		grants, err := slices.ConvertErr(resp.Value, func(ara *appRoleAssignment) (*v2.Grant, error) {
+		resp := e.cache[resource.Id.Resource].AppRolesAssignedTo
+		grants, err := slices.ConvertErr(resp, func(ara *appRoleAssignment) (*v2.Grant, error) {
 			var annos annotations.Annotations
 			rid := &v2.ResourceId{Resource: ara.PrincipalId}
 			switch ara.PrincipalType {
@@ -249,7 +230,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 		if err != nil {
 			return nil, "", nil, err
 		}
-		return grants, pageToken, nil, err
+		return grants, "", nil, err
 	case ownersStr:
 		resp := &membershipList{}
 		err = e.conn.query(ctx, graphReadScopes, http.MethodGet, ps.Token, nil, resp)
@@ -322,7 +303,8 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 
 func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuilder {
 	return &enterpriseApplicationsBuilder{
-		conn: c,
+		conn:  c,
+		cache: make(map[string]*servicePrincipal),
 	}
 }
 

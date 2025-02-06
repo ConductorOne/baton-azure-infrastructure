@@ -73,18 +73,19 @@ type assignment struct {
 }
 
 type servicePrincipal struct {
-	AccountEnabled         bool       `json:"accountEnabled,omitempty"`
-	AppDisplayName         string     `json:"appDisplayName,omitempty"`
-	AppId                  string     `json:"appId,omitempty"`
-	AppOwnerOrganizationId string     `json:"appOwnerOrganizationId,omitempty"`
-	Description            string     `json:"description,omitempty"`
-	DisplayName            string     `json:"displayName,omitempty"`
-	Homepage               string     `json:"homepage,omitempty"`
-	ID                     string     `json:"id,omitempty"`
-	Info                   info       `json:"info"`
-	ServicePrincipalType   string     `json:"servicePrincipalType,omitempty"`
-	Tags                   []string   `json:"tags,omitempty"`
-	AppRoles               []*appRole `json:"appRoles,omitempty"`
+	AccountEnabled         bool                 `json:"accountEnabled,omitempty"`
+	AppDisplayName         string               `json:"appDisplayName,omitempty"`
+	AppId                  string               `json:"appId,omitempty"`
+	AppOwnerOrganizationId string               `json:"appOwnerOrganizationId,omitempty"`
+	Description            string               `json:"description,omitempty"`
+	DisplayName            string               `json:"displayName,omitempty"`
+	Homepage               string               `json:"homepage,omitempty"`
+	ID                     string               `json:"id,omitempty"`
+	Info                   info                 `json:"info"`
+	ServicePrincipalType   string               `json:"servicePrincipalType,omitempty"`
+	Tags                   []string             `json:"tags,omitempty"`
+	AppRoles               []*appRole           `json:"appRoles,omitempty"`
+	AppRolesAssignedTo     []*appRoleAssignment `json:"appRoleAssignedTo,omitempty"`
 }
 
 type info struct {
