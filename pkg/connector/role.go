@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -85,7 +84,6 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *
 }
 
 func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	timeStart := time.Now()
 	var (
 		subscriptionID, roleID string
 		rv                     []*v2.Grant
@@ -121,8 +119,6 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 		gr = grant.NewGrant(resource, typeAssigned, principalId)
 		rv = append(rv, gr)
 	}
-	timeEnd := time.Now()
-	fmt.Printf("Time taken to list role assignments: %v\n", timeEnd.Sub(timeStart))
 
 	return rv, "", nil, nil
 }
