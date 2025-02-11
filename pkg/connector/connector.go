@@ -29,12 +29,11 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newUserBuilder(d),
 		newGroupBuilder(d),
 		newSubscriptionBuilder(d),
-		newTenantBuilder(d), // NOTE: up to here good
-		newResourceGroupBuilder(d),
+		newTenantBuilder(d),
 		newManagedIdentityBuilder(d),
-		newEnterpriseApplicationsBuilder(d), // HACK: entitlements AND grants here are slow AF (3 min)
-		// newRoleAssignmentResourceGroupBuilder(d), // HACK: this is slow AF (grants)
-		// newRoleBuilder(d), // HACK: this is also slow AF (grants)
+		newResourceGroupBuilder(d),
+		newRoleBuilder(d),
+		newEnterpriseApplicationsBuilder(d),
 	}
 }
 

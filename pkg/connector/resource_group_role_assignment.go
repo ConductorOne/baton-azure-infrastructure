@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -56,7 +57,7 @@ func (ra *roleAssignmentResourceGroupBuilder) List(ctx context.Context, parentRe
 					return nil, "", nil, err
 				}
 
-				// NOTE: The service desides how many items to return on a page.
+				// NOTE: The service decides how many items to return on a page.
 				// If a page has 0 items, then, get the next page.
 				// Other clients may be adding/deleting items from the collection while
 				// this code is paging; some items may be skipped or returned multiple times.
@@ -81,6 +82,7 @@ func (ra *roleAssignmentResourceGroupBuilder) List(ctx context.Context, parentRe
 		}
 	}
 
+	fmt.Println("Resource Group Count: ", len(rv))
 	return rv, "", nil, nil
 }
 
@@ -103,7 +105,9 @@ func (ra *roleAssignmentResourceGroupBuilder) Entitlements(ctx context.Context, 
 	return rv, "", nil, nil
 }
 
-func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+// TODO: try this instead of a get for all
+// https://learn.microsoft.com/en-us/rest/api/authorization/role-definitions/list?view=rest-authorization-2022-04-01&tabs=HTTP
+func (ra *roleAssignmentResourceGroupBuilder) Grants2(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	var (
 		rv                                        []*v2.Grant
 		gr                                        *v2.Grant
@@ -154,6 +158,64 @@ func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resour
 		}
 	}
 
+	return rv, "", nil, nil
+}
+
+func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+	var (
+		rv                                        []*v2.Grant
+		gr                                        *v2.Grant
+		principalId                               *v2.ResourceId
+		subscriptionID, resourceGroupName, roleID string
+	)
+	arr := strings.Split(resource.Id.Resource, ":")
+	if len(arr) == 3 {
+		subscriptionID = arr[1]
+		resourceGroupName = arr[0]
+		roleID = arr[2]
+	}
+
+	// Create a Role Assignments Client
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, ra.conn.token, nil)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// calculate time it takes in this block of code
+	timeStart := time.Now()
+	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, resourceGroupName)
+	pagerResourceGroup := roleAssignmentsClient.NewListForScopePager(scope, nil)
+
+	// Iterate through the role assignments
+	for pagerResourceGroup.More() {
+		page, err := pagerResourceGroup.NextPage(ctx)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		for _, roleAssignment := range page.Value {
+			roleDefinitionID := fmt.Sprintf(
+				"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
+				subscriptionID,
+				roleID)
+			if roleDefinitionID != *roleAssignment.Properties.RoleDefinitionID {
+				continue
+			}
+
+			principalType, err := getPrincipalType(ctx, ra.conn, *roleAssignment.Properties.PrincipalID)
+			if err != nil {
+				continue
+			}
+
+			principalId = getPrincipalIDResource(principalType, roleAssignment)
+			gr = grant.NewGrant(resource, typeAssigned, principalId)
+			rv = append(rv, gr)
+		}
+	}
+
+	timeEnd := time.Now()
+	elapsed := timeEnd.Sub(timeStart)
+	fmt.Println("Elapsed time: ", elapsed)
 	return rv, "", nil, nil
 }
 

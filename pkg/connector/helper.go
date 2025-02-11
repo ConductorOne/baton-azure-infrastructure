@@ -388,7 +388,11 @@ func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) 
 		appTraitOpts,
 		rs.WithAnnotation(&v2.V1Identifier{
 			Id: StringValue(s.SubscriptionID),
-		}))
+		}),
+		rs.WithAnnotation(
+			&v2.ChildResourceType{ResourceTypeId: resourceGroupResourceType.Id},
+			&v2.ChildResourceType{ResourceTypeId: roleResourceType.Id},
+		))
 }
 
 // https://learn.microsoft.com/es-es/rest/api/subscription/tenants/list?view=rest-subscription-2021-10-01&tabs=HTTP

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -20,7 +21,11 @@ import (
 )
 
 type roleBuilder struct {
-	conn *Connector
+	conn                  *Connector
+	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
+	// key subscriptionID
+	// value array of role assignments for that subscriptionID
+	subIdRoleAssignmentsCache map[string][]*armauthorization.RoleAssignment
 }
 
 func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -28,43 +33,32 @@ func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 }
 
 func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+	if parentResourceID == nil {
+		return nil, "", nil, nil
+	}
 	var rv []*v2.Resource
-	pagerSubscriptions := r.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
-	for pagerSubscriptions.More() {
-		page, err := pagerSubscriptions.NextPage(ctx)
+	subscriptionID := parentResourceID.Resource
+
+	scope := fmt.Sprintf("/subscriptions/%s", subscriptionID)
+	// Get the list of role definitions
+	pagerRoles := r.roleDefinitionsClient.NewListPager(scope, nil)
+	for pagerRoles.More() {
+		resp, err := pagerRoles.NextPage(ctx)
 		if err != nil {
 			return nil, "", nil, err
 		}
 
-		for _, subscription := range page.Value {
-			// Initialize the RoleDefinitionsClient
-			client, err := armauthorization.NewRoleDefinitionsClient(r.conn.token, nil)
+		// Iterate over role definitions
+		for _, role := range resp.Value {
+			rs, err := roleResource(ctx, role, &v2.ResourceId{
+				ResourceType: subscriptionsResourceType.Id,
+				Resource:     StringValue(&subscriptionID),
+			})
 			if err != nil {
 				return nil, "", nil, err
 			}
 
-			scope := fmt.Sprintf("/subscriptions/%s", *subscription.SubscriptionID)
-			// Get the list of role definitions
-			pagerRoles := client.NewListPager(scope, nil)
-			for pagerRoles.More() {
-				resp, err := pagerRoles.NextPage(ctx)
-				if err != nil {
-					return nil, "", nil, err
-				}
-
-				// Iterate over role definitions
-				for _, role := range resp.Value {
-					rs, err := roleResource(ctx, role, &v2.ResourceId{
-						ResourceType: subscriptionsResourceType.Id,
-						Resource:     StringValue(subscription.SubscriptionID),
-					})
-					if err != nil {
-						return nil, "", nil, err
-					}
-
-					rv = append(rv, rs)
-				}
-			}
+			rv = append(rv, rs)
 		}
 	}
 
@@ -91,6 +85,7 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *
 }
 
 func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+	timeStart := time.Now()
 	var (
 		subscriptionID, roleID string
 		rv                     []*v2.Grant
@@ -103,39 +98,31 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 		roleID = arr[0]
 	}
 
-	// Create a Role Assignments Client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.conn.token, nil)
+	err := r.cacheRoleAssignments(ctx, subscriptionID)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	// Iterate over all role assignments
-	pagerRoles := roleAssignmentsClient.NewListPager(nil)
-	for pagerRoles.More() {
-		page, err := pagerRoles.NextPage(ctx)
+	for _, assignment := range r.subIdRoleAssignmentsCache[subscriptionID] {
+		roleDefinitionID := fmt.Sprintf(
+			"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
+			subscriptionID,
+			roleID)
+		if roleDefinitionID != *assignment.Properties.RoleDefinitionID {
+			continue
+		}
+
+		principalType, err := getPrincipalType(ctx, r.conn, *assignment.Properties.PrincipalID)
 		if err != nil {
-			return nil, "", nil, err
+			continue
 		}
 
-		for _, assignment := range page.Value {
-			roleDefinitionID := fmt.Sprintf(
-				"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
-				subscriptionID,
-				roleID)
-			if roleDefinitionID != *assignment.Properties.RoleDefinitionID {
-				continue
-			}
-
-			principalType, err := getPrincipalType(ctx, r.conn, *assignment.Properties.PrincipalID)
-			if err != nil {
-				continue
-			}
-
-			principalId = getPrincipalIDResource(principalType, assignment)
-			gr = grant.NewGrant(resource, typeAssigned, principalId)
-			rv = append(rv, gr)
-		}
+		principalId = getPrincipalIDResource(principalType, assignment)
+		gr = grant.NewGrant(resource, typeAssigned, principalId)
+		rv = append(rv, gr)
 	}
+	timeEnd := time.Now()
+	fmt.Printf("Time taken to list role assignments: %v\n", timeEnd.Sub(timeStart))
 
 	return rv, "", nil, nil
 }
@@ -284,7 +271,40 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 }
 
 func newRoleBuilder(c *Connector) *roleBuilder {
-	return &roleBuilder{
-		conn: c,
+	// Initialize the RoleDefinitionsClient
+	client, err := armauthorization.NewRoleDefinitionsClient(c.token, nil)
+	if err != nil {
+		return nil
 	}
+
+	return &roleBuilder{
+		conn:                      c,
+		roleDefinitionsClient:     client,
+		subIdRoleAssignmentsCache: make(map[string][]*armauthorization.RoleAssignment),
+	}
+}
+
+func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID string) error {
+	if _, ok := r.subIdRoleAssignmentsCache[subscriptionID]; ok {
+		return nil
+	}
+
+	// Create a Role Assignments Client
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.conn.token, nil)
+	if err != nil {
+		return err
+	}
+
+	// Iterate over all role assignments
+	pagerRoles := roleAssignmentsClient.NewListPager(nil)
+	for pagerRoles.More() {
+		page, err := pagerRoles.NextPage(ctx)
+		if err != nil {
+			return err
+		}
+
+		r.subIdRoleAssignmentsCache[subscriptionID] = append(r.subIdRoleAssignmentsCache[subscriptionID], page.Value...)
+	}
+
+	return nil
 }
