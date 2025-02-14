@@ -412,9 +412,9 @@ func (o *enterpriseApplicationsBuilder) Grant(ctx context.Context, principal *v2
 	var reqURL string
 	v := url.Values{}
 	resourceID := entitlement.Resource.Id.Resource
-	var reqBody *bytes.Reader
 	switch eaEntId.Type {
 	case "owners":
+		var reqBody *bytes.Reader
 		// https://learn.microsoft.com/en-us/graph/api/serviceprincipal-list-owners?view=graph-rest-1.0&tabs=http
 		// POST /servicePrincipals/{id}/owners/$ref
 		objRef := url.URL{
@@ -429,26 +429,27 @@ func (o *enterpriseApplicationsBuilder) Grant(ctx context.Context, principal *v2
 		if err != nil {
 			return nil, err
 		}
+		err = o.conn.query(ctx, graphReadScopes, http.MethodPost, reqURL, reqBody, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to grant entitlement: %w", err)
+		}
 
 	case assignmentStr:
+		var reqBody map[string]any
 		// https://learn.microsoft.com/en-us/graph/api/serviceprincipal-post-approleassignedto?view=graph-rest-1.0&tabs=http
 		// POST /servicePrincipals/{id}/appRoleAssignedTo
-		reqURL = o.conn.buildURL(path.Join("servicePrincipals", resourceID, "appRoleAssignedTo"), v)
-		reqBody, err = (&appRoleAssignOperation{
-			AppRoleId:   eaEntId.AppRoleId,
-			PrincipalId: principal.Id.Resource,
-			ResourceId:  resourceID,
-		}).MarshalToReader()
+		reqURL = o.conn.buildBetaURL(path.Join("servicePrincipals", resourceID, "appRoleAssignedTo"), v)
+		reqBody = map[string]any{
+			"appRoleId":   eaEntId.AppRoleId,
+			"principalId": principal.Id.Resource,
+			"resourceId":  resourceID,
+		}
+		err = o.conn.query(ctx, graphReadScopes, http.MethodPost, reqURL, reqBody, nil)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to grant entitlement: %w", err)
 		}
 	default:
 		return nil, errors.New("baton-microsoft-entra: only can provision app roles or owners entitlements to an enterprise application")
-	}
-
-	err = o.conn.query(ctx, graphReadScopes, http.MethodPost, reqURL, reqBody, nil)
-	if err != nil {
-		return nil, err
 	}
 
 	return nil, nil
@@ -460,7 +461,6 @@ func (o *enterpriseApplicationsBuilder) Revoke(ctx context.Context, grant *v2.Gr
 	if err != nil {
 		return nil, err
 	}
-
 	l := ctxzap.Extract(ctx)
 
 	var reqURL string
@@ -485,7 +485,7 @@ func (o *enterpriseApplicationsBuilder) Revoke(ctx context.Context, grant *v2.Gr
 
 	err = o.conn.query(ctx, graphReadScopes, http.MethodDelete, reqURL, nil, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to revoke grant: %w", err)
 	}
 
 	return nil, nil

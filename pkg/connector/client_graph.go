@@ -100,26 +100,34 @@ func (c *Connector) doRequest(ctx context.Context,
 	res interface{},
 	body interface{},
 ) (annotations.Annotations, error) {
+
 	urlAddress, err := url.Parse(endpointUrl)
 	if err != nil {
 		return nil, err
 	}
-
 	req, err := c.httpClient.NewRequest(ctx,
 		method,
 		urlAddress,
-		uhttp.WithContentTypeJSONHeader(),
 		WithBearerToken(token),
 		uhttp.WithHeader("ConsistencyLevel", "eventual"),
+		uhttp.WithContentTypeJSONHeader(),
 		uhttp.WithJSONBody(body),
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := c.httpClient.Do(req, uhttp.WithResponse(&res))
+	resp, err := c.httpClient.Do(req, uhttp.WithResponse(res))
 	if resp != nil {
 		defer resp.Body.Close()
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		resMessage, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("microsoft-azure-infrastructure: failed to read response body: %w", err)
+		}
+		return nil, fmt.Errorf("microsoft-azure-infrastructure: %s, '%s', %w: %s", method, urlAddress.String(), ErrRequestFailed, string(resMessage))
 	}
 
 	if err != nil {
@@ -148,7 +156,7 @@ func (c *Connector) doRequest(ctx context.Context,
 	return nil, nil
 }
 
-func (c *Connector) query(ctx context.Context, scopes []string, method, requestURL string, body io.Reader, res interface{}) error {
+func (c *Connector) query(ctx context.Context, scopes []string, method, requestURL string, body interface{}, res interface{}) error {
 	token, err := c.token.GetToken(ctx, policy.TokenRequestOptions{
 		Scopes: scopes,
 	})
