@@ -303,9 +303,3 @@ func (ra *roleAssignmentResourceGroupBuilder) Revoke(ctx context.Context, grant 
 
 	return nil, nil
 }
-
-func newRoleAssignmentResourceGroupBuilder(c *Connector) *roleAssignmentResourceGroupBuilder {
-	return &roleAssignmentResourceGroupBuilder{
-		conn: c,
-	}
-}

@@ -100,7 +100,6 @@ func (c *Connector) doRequest(ctx context.Context,
 	res interface{},
 	body interface{},
 ) (annotations.Annotations, error) {
-
 	urlAddress, err := url.Parse(endpointUrl)
 	if err != nil {
 		return nil, err

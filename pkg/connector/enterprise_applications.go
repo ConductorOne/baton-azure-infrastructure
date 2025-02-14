@@ -3,7 +3,6 @@ package connector
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -330,20 +329,6 @@ func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuild
 		cache:           make(map[string]*servicePrincipal),
 		organizationIDs: organizationIDs,
 	}
-}
-
-type appRoleAssignOperation struct {
-	AppRoleId   string `json:"appRoleId"`
-	PrincipalId string `json:"principalId"`
-	ResourceId  string `json:"resourceId"`
-}
-
-func (op *appRoleAssignOperation) MarshalToReader() (*bytes.Reader, error) {
-	data, err := json.Marshal(op)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(data), nil
 }
 
 type enterpriseApplicationsEntitlementId struct {

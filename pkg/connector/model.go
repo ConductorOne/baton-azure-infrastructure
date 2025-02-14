@@ -115,12 +115,6 @@ type Organization struct {
 	ID string `json:"id"`
 }
 
-type appRoleAssignmentList struct {
-	Context  string               `json:"@odata.context"`
-	NextLink string               `json:"@odata.nextLink"`
-	Value    []*appRoleAssignment `json:"value"`
-}
-
 type appRoleAssignment struct {
 	AppRoleId            string `json:"appRoleId"`
 	CreatedDateTime      string `json:"createdDateTime"`
