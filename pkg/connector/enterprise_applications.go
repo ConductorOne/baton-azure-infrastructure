@@ -225,13 +225,8 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 				// rid.ResourceType = enterpriseApplicationResourceType.Id
 			}
 			ur := &v2.Resource{Id: rid}
-			entitlementId := fmt.Sprintf("enterprise_application:%s:assignment:%s",
-				resource.Id.Resource,
-				ara.AppRoleId,
-			)
-			id := fmt.Sprintf("%s:%s:%s", entitlementId, ur.Id.ResourceType, ur.Id.Resource)
 			return &v2.Grant{
-				Id: id,
+				Id: ara.Id,
 				Entitlement: &v2.Entitlement{
 					Id: fmt.Sprintf("enterprise_application:%s:assignment:%s",
 						resource.Id.Resource,
