@@ -599,7 +599,6 @@ func managedIdentityResource(ctx context.Context, sp *servicePrincipal, parentRe
 	} else {
 		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
 	}
-
 	ret, err := rs.NewUserResource(
 		sp.getDisplayName(),
 		managedIdentitylResourceType,
@@ -658,9 +657,10 @@ func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, p
 		options = append(options, rs.WithAppHelpURL(app.Homepage))
 	}
 
-	if app.AppOwnerOrganizationId == microsoftBuiltinAppsOwnerID {
-		options = append(options, rs.WithAppFlags(v2.AppTrait_APP_FLAG_HIDDEN))
-	}
+	// NOTE: use in case you want to mark the azure owned apps as hidden
+	// if app.AppOwnerOrganizationId == microsoftBuiltinAppsOwnerID {
+	// 	options = append(options, rs.WithAppFlags(v2.AppTrait_APP_FLAG_HIDDEN))
+	// }
 
 	ret, err := rs.NewAppResource(
 		app.getDisplayName(),

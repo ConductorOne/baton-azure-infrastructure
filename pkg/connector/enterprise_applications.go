@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+
+	goslices "slices"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -20,8 +23,9 @@ import (
 )
 
 type enterpriseApplicationsBuilder struct {
-	conn  *Connector
-	cache map[string]*servicePrincipal
+	conn            *Connector
+	cache           map[string]*servicePrincipal
+	organizationIDs []string
 }
 
 func (e *enterpriseApplicationsBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -47,11 +51,16 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 		return nil, "", nil, err
 	}
 
+	applicationsOwned := []*servicePrincipal{}
+
 	for _, sp := range resp.Value {
-		e.cache[sp.ID] = sp
+		if goslices.Contains(e.organizationIDs, sp.AppOwnerOrganizationId) {
+			e.cache[sp.ID] = sp
+			applicationsOwned = append(applicationsOwned, sp)
+		}
 	}
 
-	entApps, err := slices.ConvertErr(resp.Value, func(app *servicePrincipal) (*v2.Resource, error) {
+	entApps, err := slices.ConvertErr(applicationsOwned, func(app *servicePrincipal) (*v2.Resource, error) {
 		return enterpriseApplicationResource(ctx, app, parentResourceID)
 	})
 	if err != nil {
@@ -94,6 +103,8 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 			Purpose:     v2.Entitlement_PURPOSE_VALUE_PERMISSION,
 			Slug:        "owner",
 		},
+		// NOTE:
+		// "00000000-0000-0000-0000-000000000000" is the principal ID for the default app role.
 		{
 			Id:          defaultAppRoleAssignmentStringer.MarshalString(),
 			Resource:    resource,
@@ -214,8 +225,13 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 				// rid.ResourceType = enterpriseApplicationResourceType.Id
 			}
 			ur := &v2.Resource{Id: rid}
+			entitlementId := fmt.Sprintf("enterprise_application:%s:assignment:%s",
+				resource.Id.Resource,
+				ara.AppRoleId,
+			)
+			id := fmt.Sprintf("%s:%s:%s", entitlementId, ur.Id.ResourceType, ur.Id.Resource)
 			return &v2.Grant{
-				Id: ara.Id,
+				Id: id,
 				Entitlement: &v2.Entitlement{
 					Id: fmt.Sprintf("enterprise_application:%s:assignment:%s",
 						resource.Id.Resource,
@@ -302,9 +318,22 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 }
 
 func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuilder {
+	resp := &Organizations{}
+	reqURL := c.buildBetaURL("organization", nil)
+	err := c.query(context.Background(), graphReadScopes, http.MethodGet, reqURL, nil, resp)
+	if err != nil {
+		log.Fatal("baton-microsoft-entra: failed to get organization ID", err)
+	}
+
+	organizationIDs := []string{}
+	for _, org := range resp.Value {
+		organizationIDs = append(organizationIDs, org.ID)
+	}
+
 	return &enterpriseApplicationsBuilder{
-		conn:  c,
-		cache: make(map[string]*servicePrincipal),
+		conn:            c,
+		cache:           make(map[string]*servicePrincipal),
+		organizationIDs: organizationIDs,
 	}
 }
 

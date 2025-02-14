@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -119,7 +120,6 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 		gr = grant.NewGrant(resource, typeAssigned, principalId)
 		rv = append(rv, gr)
 	}
-
 	return rv, "", nil, nil
 }
 
@@ -270,6 +270,7 @@ func newRoleBuilder(c *Connector) *roleBuilder {
 	// Initialize the RoleDefinitionsClient
 	client, err := armauthorization.NewRoleDefinitionsClient(c.token, nil)
 	if err != nil {
+		log.Fatalf("failed to create role definitions client: %v", err)
 		return nil
 	}
 

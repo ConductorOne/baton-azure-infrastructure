@@ -107,6 +107,14 @@ type servicePrincipalsList struct {
 	Value    []*servicePrincipal `json:"value,omitempty"`
 }
 
+type Organizations struct {
+	Value []*Organization `json:"value"`
+}
+
+type Organization struct {
+	ID string `json:"id"`
+}
+
 type appRoleAssignmentList struct {
 	Context  string               `json:"@odata.context"`
 	NextLink string               `json:"@odata.nextLink"`
