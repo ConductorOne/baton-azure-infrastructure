@@ -5,7 +5,7 @@ go 1.22.10
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.16.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.8.0
-	github.com/conductorone/baton-sdk v0.2.55
+	github.com/conductorone/baton-sdk v0.2.61
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.10.0
