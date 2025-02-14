@@ -6,9 +6,21 @@
 
 Check out [Baton](https://github.com/conductorone/baton) to learn more the project in general.
 
-# Getting Started
+# Requirements
+- You need a Microsoft tenant. You get one with an [Azure free trial](https://azure.microsoft.com/pricing/free-trial/). 
+- Once you have a tenant, you need to create an application in Azure AD. You can follow the instructions [here](https://docs.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app).
+- When you create the application, you will get a `client_id` and a `client_secret`. You will need these to authenticate with the Azure API.
+- Then you will need to get the `tenant_id` of your Azure AD tenant. You can find this in the Azure Entra ID Overview page [here](https://portal.azure.com/#blade/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/Overview).
 
-You need a Microsoft tenant. You get one with an [Azure free trial](https://azure.microsoft.com/pricing/free-trial/). 
+Finally you will need to set the following environment variables:
+
+```
+export BATON_AZURE_CLIENT_ID=<client_id>
+export BATON_AZURE_CLIENT_SECRET=<client_secret>
+export BATON_AZURE_TENANT_ID=<tenant_id>
+```
+
+# Getting Started
 
 ## brew
 

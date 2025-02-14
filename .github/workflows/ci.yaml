@@ -45,7 +45,7 @@ jobs:
       BATON_AZURE_CLIENT_ID: ${{ secrets.BATON_AZURE_CLIENT_ID }}
       BATON_AZURE_CLIENT_SECRET: ${{ secrets.BATON_AZURE_CLIENT_SECRET }}
       BATON_AZURE_TENANT_ID: ${{ secrets.BATON_AZURE_TENANT_ID }}
-      BATON_ENTITLEMENT: "enterprise_application:981c2ab3-9d18-4d39-ac6d-302ce3570ed1:assignment:18d14569-c3bd-439b-9a66-3a2aee01d14f:user:5f571df9-a726-4815-947d-32e73e96908d"
+      BATON_ENTITLEMENT: "enterprise_application:981c2ab3-9d18-4d39-ac6d-302ce3570ed1:assignment:18d14569-c3bd-439b-9a66-3a2aee01d14f"
       BATON_GRANT: "enterprise_application:981c2ab3-9d18-4d39-ac6d-302ce3570ed1:assignment:18d14569-c3bd-439b-9a66-3a2aee01d14f:user:5f571df9-a726-4815-947d-32e73e96908d"
       BATON_PRINCIPAL: "5f571df9-a726-4815-947d-32e73e96908d"
       BATON_PRINCIPAL_TYPE: "user"
