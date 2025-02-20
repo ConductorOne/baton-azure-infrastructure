@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 
 	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -26,6 +27,20 @@ type roleBuilder struct {
 	// key subscriptionID
 	// value array of role assignments for that subscriptionID
 	subIdRoleAssignmentsCache map[string][]*armauthorization.RoleAssignment
+	mu                        sync.RWMutex
+}
+
+func (r *roleBuilder) cacheGet(id string) ([]*armauthorization.RoleAssignment, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	value, ok := r.subIdRoleAssignmentsCache[id]
+	return value, ok
+}
+
+func (r *roleBuilder) cacheSet(id string, value []*armauthorization.RoleAssignment) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.subIdRoleAssignmentsCache[id] = value
 }
 
 func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -102,7 +117,8 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 		return nil, "", nil, err
 	}
 
-	for _, assignment := range r.subIdRoleAssignmentsCache[subscriptionID] {
+	assignments, _ := r.cacheGet(subscriptionID)
+	for _, assignment := range assignments {
 		roleDefinitionID := fmt.Sprintf(
 			"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
 			subscriptionID,
@@ -282,7 +298,7 @@ func newRoleBuilder(c *Connector) *roleBuilder {
 }
 
 func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID string) error {
-	if _, ok := r.subIdRoleAssignmentsCache[subscriptionID]; ok {
+	if _, ok := r.cacheGet(subscriptionID); ok {
 		return nil
 	}
 
@@ -300,7 +316,8 @@ func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID s
 			return err
 		}
 
-		r.subIdRoleAssignmentsCache[subscriptionID] = append(r.subIdRoleAssignmentsCache[subscriptionID], page.Value...)
+		assignments, _ := r.cacheGet(subscriptionID)
+		r.cacheSet(subscriptionID, append(assignments, page.Value...))
 	}
 
 	return nil

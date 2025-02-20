@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 
 	goslices "slices"
 
@@ -24,7 +25,20 @@ import (
 type enterpriseApplicationsBuilder struct {
 	conn            *Connector
 	cache           map[string]*servicePrincipal
+	mu              sync.RWMutex
 	organizationIDs []string
+}
+
+func (e *enterpriseApplicationsBuilder) cacheSet(id string, value *servicePrincipal) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cache[id] = value
+}
+
+func (e *enterpriseApplicationsBuilder) cacheGet(id string) *servicePrincipal {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.cache[id]
 }
 
 func (e *enterpriseApplicationsBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -54,7 +68,7 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 
 	for _, sp := range resp.Value {
 		if goslices.Contains(e.organizationIDs, sp.AppOwnerOrganizationId) {
-			e.cache[sp.ID] = sp
+			e.cacheSet(sp.ID, sp)
 			applicationsOwned = append(applicationsOwned, sp)
 		}
 	}
@@ -115,7 +129,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 		},
 	}
 
-	servicePrincipal := e.cache[resource.Id.Resource]
+	servicePrincipal := e.cacheGet(resource.Id.Resource)
 	for _, appRole := range servicePrincipal.AppRoles {
 		usersAllowed := false
 		for _, memberType := range appRole.AllowedMemberTypes {
@@ -201,7 +215,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	ps := b.Current()
 	switch ps.ResourceTypeID {
 	case assignmentStr:
-		resp := e.cache[resource.Id.Resource].AppRolesAssignedTo
+		resp := e.cacheGet(resource.Id.Resource).AppRolesAssignedTo
 		grants, err := slices.ConvertErr(resp, func(ara *appRoleAssignment) (*v2.Grant, error) {
 			var annos annotations.Annotations
 			rid := &v2.ResourceId{Resource: ara.PrincipalId}
