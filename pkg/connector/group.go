@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -20,6 +21,7 @@ import (
 
 type groupBuilder struct {
 	conn                       *Connector
+	mu                         sync.RWMutex
 	knownGroupMembershipTypes  map[string]bool
 	knownServicePrincipalTypes map[string]bool
 }

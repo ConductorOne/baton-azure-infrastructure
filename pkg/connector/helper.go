@@ -291,6 +291,8 @@ func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, per
 
 func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Resource, g *groupBuilder, ps *pagination.PageState) ([]*v2.Grant, error) {
 	grants, err := slices.ConvertErr(resp.Members, func(gm *membership) (*v2.Grant, error) {
+		g.mu.RLock()
+		defer g.mu.RUnlock()
 		var annos annotations.Annotations
 		objectID := resource.Id.GetResource()
 		rid := &v2.ResourceId{Resource: gm.Id}
