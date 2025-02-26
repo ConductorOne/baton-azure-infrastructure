@@ -19,8 +19,6 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	pagination "github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	zap "go.uber.org/zap"
 	expSlices "golang.org/x/exp/slices"
 )
 
@@ -291,8 +289,6 @@ func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, per
 
 func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Resource, g *groupBuilder, ps *pagination.PageState) ([]*v2.Grant, error) {
 	grants, err := slices.ConvertErr(resp.Members, func(gm *membership) (*v2.Grant, error) {
-		g.mu.RLock()
-		defer g.mu.RUnlock()
 		var annos annotations.Annotations
 		objectID := resource.Id.GetResource()
 		rid := &v2.ResourceId{Resource: gm.Id}
@@ -316,30 +312,9 @@ func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Reso
 				// https://learn.microsoft.com/en-us/graph/api/resources/serviceprincipal?view=graph-rest-1.0
 				fallthrough
 			default:
-				if !g.knownServicePrincipalTypes[gm.ServicePrincipalType] {
-					// Only log once per sync per type, to reduce log spam and datadog costs
-					ctxzap.Extract(ctx).Warn(
-						"Grants: unsupported ServicePrincipalType type on Group Membership",
-						zap.String("type", gm.ServicePrincipalType),
-						zap.String("objectID", objectID),
-						zap.Any("membership", gm),
-					)
-					g.knownServicePrincipalTypes[gm.ServicePrincipalType] = true
-				}
-
 				return nil, nil
 			}
 		default:
-			if !g.knownGroupMembershipTypes[gm.Type] {
-				// Only log once per sync per type, to reduce log spam and datadog costs
-				ctxzap.Extract(ctx).Warn(
-					"Grants: unsupported resource type on Group Membership",
-					zap.String("type", gm.Type),
-					zap.String("objectID", objectID),
-					zap.Any("membership", gm),
-				)
-				g.knownGroupMembershipTypes[gm.Type] = true
-			}
 			return nil, nil
 		}
 		ur := &v2.Resource{Id: rid}
