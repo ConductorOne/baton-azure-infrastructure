@@ -267,6 +267,8 @@ func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 
 func newGroupBuilder(c *Connector) *groupBuilder {
 	return &groupBuilder{
-		conn: c,
+		conn:                       c,
+		knownGroupMembershipTypes:  make(map[string]bool),
+		knownServicePrincipalTypes: make(map[string]bool),
 	}
 }
