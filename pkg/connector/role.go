@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -282,19 +281,18 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	return nil, nil
 }
 
-func newRoleBuilder(c *Connector) *roleBuilder {
+func newRoleBuilder(c *Connector) (*roleBuilder, error) {
 	// Initialize the RoleDefinitionsClient
 	client, err := armauthorization.NewRoleDefinitionsClient(c.token, nil)
 	if err != nil {
-		log.Fatalf("failed to create role definitions client: %v", err)
-		return nil
+		return nil, fmt.Errorf("failed to create role definitions client: %w", err)
 	}
 
 	return &roleBuilder{
 		conn:                      c,
 		roleDefinitionsClient:     client,
 		subIdRoleAssignmentsCache: make(map[string][]*armauthorization.RoleAssignment),
-	}
+	}, nil
 }
 
 func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID string) error {

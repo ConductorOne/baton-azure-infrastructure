@@ -32,15 +32,20 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newSubscriptionBuilder(d),
 		newTenantBuilder(d),
 		newResourceGroupBuilder(d),
-		newRoleBuilder(d),
 		newManagedIdentityBuilder(d),
 	}
 
+	l := ctxzap.Extract(ctx)
 	if enterpriseBuilder, err := newEnterpriseApplicationsBuilder(ctx, d); err == nil {
 		syncers = append(syncers, enterpriseBuilder)
 	} else {
-		l := ctxzap.Extract(ctx)
 		l.Error("baton-microsoft-entra: failed to create enterprise applications builder", zap.Error(err))
+	}
+
+	if roleBuilder, err := newRoleBuilder(d); err == nil {
+		syncers = append(syncers, roleBuilder)
+	} else {
+		l.Error("baton-microsoft-entra: failed to create role builder", zap.Error(err))
 	}
 
 	return syncers
