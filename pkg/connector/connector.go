@@ -8,22 +8,23 @@ import (
 
 	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	uhttp "github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	"go.uber.org/zap"
 )
 
 type Connector struct {
-	token           azcore.TokenCredential
-	httpClient      *uhttp.BaseHttpClient
-	MailboxSettings bool
-	SkipAdGroups    bool
-	organizationIDs []string
-	clientFactory   *armsubscription.ClientFactory
+	token                 azcore.TokenCredential
+	httpClient            *uhttp.BaseHttpClient
+	MailboxSettings       bool
+	SkipAdGroups          bool
+	organizationIDs       []string
+	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
+	clientFactory         *armsubscription.ClientFactory
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
@@ -36,15 +37,8 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newResourceGroupBuilder(d),
 		newManagedIdentityBuilder(d),
 		newEnterpriseApplicationsBuilder(d),
+		newRoleBuilder(d),
 	}
-
-	if roleBuilder, err := newRoleBuilder(d); err == nil {
-		syncers = append(syncers, roleBuilder)
-	} else {
-		l := ctxzap.Extract(ctx)
-		l.Error("baton-microsoft-entra: failed to create role builder", zap.Error(err))
-	}
-
 	return syncers
 }
 
@@ -91,12 +85,28 @@ func NewConnectorFromToken(ctx context.Context,
 		SkipAdGroups:    skipAdGroups,
 		clientFactory:   clientFactory,
 	}
+
 	organizationIDs, err := c.getOrganizationIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
 	c.organizationIDs = organizationIDs
+
+	roleDefinitionsClient, err := c.getRoleDefinitionsClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.roleDefinitionsClient = roleDefinitionsClient
+
 	return c, nil
+}
+
+func (d *Connector) getRoleDefinitionsClient(ctx context.Context) (*armauthorization.RoleDefinitionsClient, error) {
+	client, err := armauthorization.NewRoleDefinitionsClient(d.token, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 func (d *Connector) getOrganizationIDs(ctx context.Context) ([]string, error) {
