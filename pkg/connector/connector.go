@@ -92,7 +92,7 @@ func NewConnectorFromToken(ctx context.Context,
 	}
 	c.organizationIDs = organizationIDs
 
-	roleDefinitionsClient, err := c.getRoleDefinitionsClient(ctx)
+	roleDefinitionsClient, err := c.getRoleDefinitionsClient()
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func NewConnectorFromToken(ctx context.Context,
 	return c, nil
 }
 
-func (d *Connector) getRoleDefinitionsClient(ctx context.Context) (*armauthorization.RoleDefinitionsClient, error) {
+func (d *Connector) getRoleDefinitionsClient() (*armauthorization.RoleDefinitionsClient, error) {
 	client, err := armauthorization.NewRoleDefinitionsClient(d.token, nil)
 	if err != nil {
 		return nil, err
