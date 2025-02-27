@@ -340,24 +340,12 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	}
 }
 
-func newEnterpriseApplicationsBuilder(ctx context.Context, c *Connector) (*enterpriseApplicationsBuilder, error) {
-	resp := &Organizations{}
-	reqURL := c.buildBetaURL("organization", nil)
-	err := c.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
-	if err != nil {
-		return nil, fmt.Errorf("baton-microsoft-entra: failed to get organization ID: %w", err)
-	}
-
-	organizationIDs := []string{}
-	for _, org := range resp.Value {
-		organizationIDs = append(organizationIDs, org.ID)
-	}
-
+func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuilder {
 	return &enterpriseApplicationsBuilder{
 		conn:            c,
 		cache:           make(map[string]*servicePrincipal),
-		organizationIDs: organizationIDs,
-	}, nil
+		organizationIDs: c.organizationIDs,
+	}
 }
 
 type enterpriseApplicationsEntitlementId struct {

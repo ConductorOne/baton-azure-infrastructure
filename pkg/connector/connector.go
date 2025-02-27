@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -21,6 +22,7 @@ type Connector struct {
 	httpClient      *uhttp.BaseHttpClient
 	MailboxSettings bool
 	SkipAdGroups    bool
+	organizationIDs []string
 	clientFactory   *armsubscription.ClientFactory
 }
 
@@ -33,18 +35,13 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newTenantBuilder(d),
 		newResourceGroupBuilder(d),
 		newManagedIdentityBuilder(d),
-	}
-
-	l := ctxzap.Extract(ctx)
-	if enterpriseBuilder, err := newEnterpriseApplicationsBuilder(ctx, d); err == nil {
-		syncers = append(syncers, enterpriseBuilder)
-	} else {
-		l.Error("baton-microsoft-entra: failed to create enterprise applications builder", zap.Error(err))
+		newEnterpriseApplicationsBuilder(d),
 	}
 
 	if roleBuilder, err := newRoleBuilder(d); err == nil {
 		syncers = append(syncers, roleBuilder)
 	} else {
+		l := ctxzap.Extract(ctx)
 		l.Error("baton-microsoft-entra: failed to create role builder", zap.Error(err))
 	}
 
@@ -87,13 +84,35 @@ func NewConnectorFromToken(ctx context.Context,
 		return nil, err
 	}
 
-	return &Connector{
+	c := &Connector{
 		token:           token,
 		httpClient:      client,
 		MailboxSettings: mailboxSettings,
 		SkipAdGroups:    skipAdGroups,
 		clientFactory:   clientFactory,
-	}, nil
+	}
+	organizationIDs, err := c.getOrganizationIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.organizationIDs = organizationIDs
+	return c, nil
+}
+
+func (d *Connector) getOrganizationIDs(ctx context.Context) ([]string, error) {
+	resp := &Organizations{}
+	reqURL := d.buildBetaURL("organization", nil)
+	err := d.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
+	if err != nil {
+		return nil, fmt.Errorf("baton-microsoft-entra: failed to get organization ID: %w", err)
+	}
+
+	organizationIDs := []string{}
+	for _, org := range resp.Value {
+		organizationIDs = append(organizationIDs, org.ID)
+	}
+
+	return organizationIDs, nil
 }
 
 // New returns a new instance of the connector.
