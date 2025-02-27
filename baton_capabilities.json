@@ -1,125 +1,99 @@
 {
-  "@type":  "type.googleapis.com/c1.connector.v2.ConnectorCapabilities",
-  "resourceTypeCapabilities":  [
+  "@type": "type.googleapis.com/c1.connector.v2.ConnectorCapabilities",
+  "resourceTypeCapabilities": [
     {
-      "resourceType":  {
-        "id":  "enterprise_application",
-        "displayName":  "Enterprise Application of Azure Infrastructure",
-        "traits":  [
-          "TRAIT_APP"
-        ]
-      },
-      "capabilities":  [
-        "CAPABILITY_SYNC",
-        "CAPABILITY_PROVISION"
-      ]
-    },
-    {
-      "resourceType":  {
-        "id":  "group",
-        "displayName":  "Group of Azure Infrastructure",
-        "traits":  [
+      "resourceType": {
+        "id": "group",
+        "displayName": "Group of Azure Infrastructure",
+        "traits": [
           "TRAIT_GROUP"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC",
         "CAPABILITY_PROVISION"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "managed_identity",
-        "displayName":  "Managed Identity of Azure Infrastructure",
-        "traits":  [
+      "resourceType": {
+        "id": "managed_identity",
+        "displayName": "Managed Identity of Azure Infrastructure",
+        "traits": [
           "TRAIT_USER"
         ],
-        "annotations":  [
+        "annotations": [
           {
-            "@type":  "type.googleapis.com/c1.connector.v2.SkipEntitlementsAndGrants"
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlementsAndGrants"
           }
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "resource_group",
-        "displayName":  "Resource Group of Azure Infrastructure",
-        "traits":  [
+      "resourceType": {
+        "id": "resource_group",
+        "displayName": "Resource Group of Azure Infrastructure",
+        "traits": [
           "TRAIT_GROUP"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "resource_group_role_assignment",
-        "displayName":  "Role Assignment Resource Group of Azure Infrastructure",
-        "traits":  [
-          "TRAIT_GROUP"
-        ]
-      },
-      "capabilities":  [
-        "CAPABILITY_SYNC",
-        "CAPABILITY_PROVISION"
-      ]
-    },
-    {
-      "resourceType":  {
-        "id":  "role",
-        "displayName":  "Role",
-        "traits":  [
+      "resourceType": {
+        "id": "role",
+        "displayName": "Role",
+        "traits": [
           "TRAIT_ROLE"
         ],
-        "description":  "Role of Azure Infrastructure"
+        "description": "Role of Azure Infrastructure"
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC",
         "CAPABILITY_PROVISION"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "subscription",
-        "displayName":  "Subscription of Azure Infrastructure",
-        "traits":  [
+      "resourceType": {
+        "id": "subscription",
+        "displayName": "Subscription of Azure Infrastructure",
+        "traits": [
           "TRAIT_APP"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "tenant",
-        "displayName":  "Tenant of Azure Infrastructure"
+      "resourceType": {
+        "id": "tenant",
+        "displayName": "Tenant of Azure Infrastructure"
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "user",
-        "displayName":  "User of Azure Infrastructure",
-        "traits":  [
+      "resourceType": {
+        "id": "user",
+        "displayName": "User of Azure Infrastructure",
+        "traits": [
           "TRAIT_USER"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     }
   ],
-  "connectorCapabilities":  [
+  "connectorCapabilities": [
     "CAPABILITY_PROVISION",
     "CAPABILITY_SYNC"
   ],
-  "credentialDetails":  {}
+  "credentialDetails": {}
 }
