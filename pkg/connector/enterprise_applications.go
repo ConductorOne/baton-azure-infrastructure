@@ -336,7 +336,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 
 		return grants, pageToken, nil, nil
 	default:
-		panic("not reached")
+		return nil, "", nil, fmt.Errorf("unknown resource type: %s", ps.ResourceTypeID)
 	}
 }
 
