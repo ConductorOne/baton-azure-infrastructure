@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -325,12 +324,12 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	}
 }
 
-func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuilder {
+func newEnterpriseApplicationsBuilder(ctx context.Context, c *Connector) (*enterpriseApplicationsBuilder, error) {
 	resp := &Organizations{}
 	reqURL := c.buildBetaURL("organization", nil)
-	err := c.query(context.Background(), graphReadScopes, http.MethodGet, reqURL, nil, resp)
+	err := c.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
-		log.Fatal("baton-microsoft-entra: failed to get organization ID", err)
+		return nil, fmt.Errorf("baton-microsoft-entra: failed to get organization ID: %w", err)
 	}
 
 	organizationIDs := []string{}
@@ -342,7 +341,7 @@ func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuild
 		conn:            c,
 		cache:           make(map[string]*servicePrincipal),
 		organizationIDs: organizationIDs,
-	}
+	}, nil
 }
 
 type enterpriseApplicationsEntitlementId struct {
