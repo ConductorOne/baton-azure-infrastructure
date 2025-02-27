@@ -3,14 +3,12 @@ package connector
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
-	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -507,31 +505,4 @@ func TestListAllRoles(t *testing.T) {
 
 	_, err = getAllRoles(ctxTest, &connTest, "")
 	require.Nil(t, err)
-}
-
-func TestEnterpriseApplicationsGrants(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.Nil(t, err)
-
-	s := &enterpriseApplicationsBuilder{
-		conn: &connTest,
-	}
-	reqURL := connTest.buildURL("servicePrincipals", setEnterpriseApplicationsKeys())
-	resp := &servicePrincipalsList{}
-	err = connTest.query(ctxTest, graphReadScopes, http.MethodGet, reqURL, nil, resp)
-	require.Nil(t, err)
-
-	entApps, err := slices.ConvertErr(resp.Value, func(app *servicePrincipal) (*v2.Resource, error) {
-		return enterpriseApplicationResource(ctxTest, app, nil)
-	})
-	require.Nil(t, err)
-
-	for _, res := range entApps {
-		_, _, _, err = s.Grants(ctxTest, res, &pagination.Token{})
-		require.Nil(t, err)
-	}
 }
