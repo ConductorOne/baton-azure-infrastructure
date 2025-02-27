@@ -19,9 +19,7 @@ import (
 )
 
 type groupBuilder struct {
-	conn                       *Connector
-	knownGroupMembershipTypes  map[string]bool
-	knownServicePrincipalTypes map[string]bool
+	conn *Connector
 }
 
 const (
