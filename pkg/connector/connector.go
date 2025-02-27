@@ -13,6 +13,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	uhttp "github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 type Connector struct {
@@ -25,16 +26,24 @@ type Connector struct {
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	return []connectorbuilder.ResourceSyncer{
+	syncers := []connectorbuilder.ResourceSyncer{
 		newUserBuilder(d),
 		newGroupBuilder(d),
 		newSubscriptionBuilder(d),
 		newTenantBuilder(d),
 		newResourceGroupBuilder(d),
 		newRoleBuilder(d),
-		newEnterpriseApplicationsBuilder(d),
 		newManagedIdentityBuilder(d),
 	}
+
+	if enterpriseBuilder, err := newEnterpriseApplicationsBuilder(ctx, d); err == nil {
+		syncers = append(syncers, enterpriseBuilder)
+	} else {
+		l := ctxzap.Extract(ctx)
+		l.Error("baton-microsoft-entra: failed to create enterprise applications builder", zap.Error(err))
+	}
+
+	return syncers
 }
 
 // Asset takes an input AssetRef and attempts to fetch it using the connector's authenticated http client
