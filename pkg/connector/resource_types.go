@@ -19,12 +19,6 @@ var (
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP},
 	}
 
-	enterpriseApplicationResourceType = &v2.ResourceType{
-		Id:          "enterprise_application",
-		DisplayName: "Enterprise Application of Azure Infrastructure",
-		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_APP},
-	}
-
 	managedIdentitylResourceType = &v2.ResourceType{
 		Id:          "managed_identity",
 		DisplayName: "Managed Identity of Azure Infrastructure",

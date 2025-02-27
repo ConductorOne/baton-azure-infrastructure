@@ -305,7 +305,7 @@ func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Reso
 		case odataTypeServicePrincipal:
 			switch gm.ServicePrincipalType {
 			case spTypeApplication:
-				rid.ResourceType = enterpriseApplicationResourceType.Id
+				return nil, nil
 			case spTypeManagedIdentity:
 				rid.ResourceType = managedIdentitylResourceType.Id
 			case spTypeLegacy, spTypeSocialIdp, "":
@@ -601,61 +601,6 @@ func setManagedIdentityKeys() url.Values {
 	return v
 }
 
-func setEnterpriseApplicationsKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join(servicePrincipalSelect, ","))
-	v.Set("$filter", "servicePrincipalType eq 'Application' AND accountEnabled eq true")
-	v.Set("$top", "999")
-	return v
-}
-
-func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
-	profile := make(map[string]interface{})
-	profile["id"] = app.ID
-	profile["app_id"] = app.AppId
-	if expSlices.Contains(app.Tags, "WindowsAzureActiveDirectoryIntegratedApp") {
-		profile["is_integrated"] = true
-	}
-
-	if expSlices.Contains(app.Tags, "HideApp") {
-		profile["hidden_app"] = true
-	}
-
-	options := []rs.AppTraitOption{
-		rs.WithAppProfile(profile),
-	}
-	if !IsEmpty(app.Info.LogoUrl) {
-		options = append(options, rs.WithAppLogo(&v2.AssetRef{
-			Id: app.Info.LogoUrl,
-		}))
-	}
-
-	if !IsEmpty(app.Homepage) {
-		options = append(options, rs.WithAppHelpURL(app.Homepage))
-	}
-
-	// NOTE: use in case you want to mark the azure owned apps as hidden
-	// if app.AppOwnerOrganizationId == microsoftBuiltinAppsOwnerID {
-	// 	options = append(options, rs.WithAppFlags(v2.AppTrait_APP_FLAG_HIDDEN))
-	// }
-
-	ret, err := rs.NewAppResource(
-		app.getDisplayName(),
-		enterpriseApplicationResourceType,
-		app.ID,
-		options,
-		rs.WithParentResourceID(parentResourceID),
-		rs.WithAnnotation(&v2.ExternalLink{
-			Url: app.externalURL(),
-		}),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
-
 func getAllRoles(ctx context.Context, conn *Connector, subscriptionID string) ([]string, error) {
 	lstRoles := []string{}
 	// Initialize the RoleDefinitionsClient
@@ -696,10 +641,7 @@ func getPrincipalIDResource(principalType string, assignment *armauthorization.R
 			Resource:     *assignment.Properties.PrincipalID,
 		}
 	case "Application":
-		principalId = &v2.ResourceId{
-			ResourceType: enterpriseApplicationResourceType.Id,
-			Resource:     *assignment.Properties.PrincipalID,
-		}
+		return nil
 	case "ManagedIdentity":
 		principalId = &v2.ResourceId{
 			ResourceType: managedIdentitylResourceType.Id,

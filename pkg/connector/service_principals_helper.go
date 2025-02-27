@@ -5,11 +5,6 @@ import (
 	"net/url"
 )
 
-const (
-	ownersStr     = "owners"
-	assignmentStr = "assignment"
-)
-
 var servicePrincipalSelect = []string{
 	"accountEnabled",
 	"appDisplayName",

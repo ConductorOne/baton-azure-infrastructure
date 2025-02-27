@@ -27,16 +27,6 @@ var (
 	ErrNoResponse             = errors.New("HTTP request failed to supply a value")
 	ErrRequestFailed          = errors.New("HTTP request failed")
 	ErrFailedToParseRateLimit = errors.New("failed to parse rate limit")
-
-	// https://learn.microsoft.com/en-us/graph/api/resources/approleassignment?view=graph-rest-1.0
-	//
-	//  	The identifier (id) for the app role which is assigned to the principal. This app role must be
-	//		exposed in the appRoles property on the resource application's service principal (resourceId).
-	//		If the resource application has not declared any app roles, a default app role ID of
-	//		00000000-0000-0000-0000-000000000000 can be specified to signal that the principal is assigned
-	//		to the resource app without any specific app roles. Required on create
-	//
-	defaultAppRoleAssignmentID = "00000000-0000-0000-0000-000000000000"
 )
 
 type HTTPError struct {
