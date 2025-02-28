@@ -104,10 +104,21 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 		AppRoleId: defaultAppRoleAssignmentID,
 	}
 
+	var err error
+	ownersEntidString, err := ownersEntid.MarshalString()
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	defaultAppRoleAssignmentStringerString, err := defaultAppRoleAssignmentStringer.MarshalString()
+	if err != nil {
+		return nil, "", nil, err
+	}
+
 	// https://learn.microsoft.com/en-us/graph/api/resources/approleassignment?view=graph-rest-1.0
 	rv := []*v2.Entitlement{
 		{
-			Id:          ownersEntid.MarshalString(),
+			Id:          ownersEntidString,
 			Resource:    resource,
 			DisplayName: fmt.Sprintf("%s Application Owner", resource.DisplayName),
 			Description: fmt.Sprintf("Owner of %s Application", resource.DisplayName),
@@ -118,7 +129,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 		// NOTE:
 		// "00000000-0000-0000-0000-000000000000" is the principal ID for the default app role.
 		{
-			Id:          defaultAppRoleAssignmentStringer.MarshalString(),
+			Id:          defaultAppRoleAssignmentStringerString,
 			Resource:    resource,
 			DisplayName: fmt.Sprintf("%s Application Assignment", resource.DisplayName),
 			Description: fmt.Sprintf("Assigned to %s Application", resource.DisplayName),
@@ -153,8 +164,13 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 			slug = appRole.DisplayName
 		}
 
+		appRoleAssignmentIdString, err := appRoleAssignmentId.MarshalString()
+		if err != nil {
+			return nil, "", nil, err
+		}
+
 		rv = append(rv, &v2.Entitlement{
-			Id:          appRoleAssignmentId.MarshalString(),
+			Id:          appRoleAssignmentIdString,
 			Resource:    resource,
 			DisplayName: fmt.Sprintf("%s Role Assignment", appRole.DisplayName),
 			Description: fmt.Sprintf("Assigned to %s Application with %s Role", resource.DisplayName, appRole.Description),
@@ -320,28 +336,16 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 
 		return grants, pageToken, nil, nil
 	default:
-		panic("not reached")
+		return nil, "", nil, fmt.Errorf("unknown resource type: %s", ps.ResourceTypeID)
 	}
 }
 
-func newEnterpriseApplicationsBuilder(ctx context.Context, c *Connector) (*enterpriseApplicationsBuilder, error) {
-	resp := &Organizations{}
-	reqURL := c.buildBetaURL("organization", nil)
-	err := c.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
-	if err != nil {
-		return nil, fmt.Errorf("baton-microsoft-entra: failed to get organization ID: %w", err)
-	}
-
-	organizationIDs := []string{}
-	for _, org := range resp.Value {
-		organizationIDs = append(organizationIDs, org.ID)
-	}
-
+func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuilder {
 	return &enterpriseApplicationsBuilder{
 		conn:            c,
 		cache:           make(map[string]*servicePrincipal),
-		organizationIDs: organizationIDs,
-	}, nil
+		organizationIDs: c.organizationIDs,
+	}
 }
 
 type enterpriseApplicationsEntitlementId struct {
@@ -350,7 +354,7 @@ type enterpriseApplicationsEntitlementId struct {
 	AppRoleId string
 }
 
-func (id *enterpriseApplicationsEntitlementId) MarshalString() string {
+func (id *enterpriseApplicationsEntitlementId) MarshalString() (string, error) {
 	switch id.Type {
 	case "appRole":
 		return strings.Join(
@@ -360,7 +364,7 @@ func (id *enterpriseApplicationsEntitlementId) MarshalString() string {
 				assignmentStr,
 				id.AppRoleId,
 			},
-			":")
+			":"), nil
 	case ownersStr:
 		return strings.Join(
 			[]string{
@@ -368,9 +372,9 @@ func (id *enterpriseApplicationsEntitlementId) MarshalString() string {
 				id.Resource,
 				ownersStr,
 			},
-			":")
+			":"), nil
 	default:
-		panic("not reached")
+		return "", fmt.Errorf("unknown entitlement type: %s", id.Type)
 	}
 }
 

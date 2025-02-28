@@ -2,26 +2,29 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 
 	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	uhttp "github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	"go.uber.org/zap"
 )
 
 type Connector struct {
-	token           azcore.TokenCredential
-	httpClient      *uhttp.BaseHttpClient
-	MailboxSettings bool
-	SkipAdGroups    bool
-	clientFactory   *armsubscription.ClientFactory
+	token                 azcore.TokenCredential
+	httpClient            *uhttp.BaseHttpClient
+	MailboxSettings       bool
+	SkipAdGroups          bool
+	organizationIDs       []string
+	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
+	clientFactory         *armsubscription.ClientFactory
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
@@ -33,21 +36,9 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newTenantBuilder(d),
 		newResourceGroupBuilder(d),
 		newManagedIdentityBuilder(d),
+		newEnterpriseApplicationsBuilder(d),
+		newRoleBuilder(d),
 	}
-
-	l := ctxzap.Extract(ctx)
-	if enterpriseBuilder, err := newEnterpriseApplicationsBuilder(ctx, d); err == nil {
-		syncers = append(syncers, enterpriseBuilder)
-	} else {
-		l.Error("baton-microsoft-entra: failed to create enterprise applications builder", zap.Error(err))
-	}
-
-	if roleBuilder, err := newRoleBuilder(d); err == nil {
-		syncers = append(syncers, roleBuilder)
-	} else {
-		l.Error("baton-microsoft-entra: failed to create role builder", zap.Error(err))
-	}
-
 	return syncers
 }
 
@@ -87,13 +78,51 @@ func NewConnectorFromToken(ctx context.Context,
 		return nil, err
 	}
 
-	return &Connector{
+	c := &Connector{
 		token:           token,
 		httpClient:      client,
 		MailboxSettings: mailboxSettings,
 		SkipAdGroups:    skipAdGroups,
 		clientFactory:   clientFactory,
-	}, nil
+	}
+
+	organizationIDs, err := c.getOrganizationIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.organizationIDs = organizationIDs
+
+	roleDefinitionsClient, err := c.getRoleDefinitionsClient()
+	if err != nil {
+		return nil, err
+	}
+	c.roleDefinitionsClient = roleDefinitionsClient
+
+	return c, nil
+}
+
+func (d *Connector) getRoleDefinitionsClient() (*armauthorization.RoleDefinitionsClient, error) {
+	client, err := armauthorization.NewRoleDefinitionsClient(d.token, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
+func (d *Connector) getOrganizationIDs(ctx context.Context) ([]string, error) {
+	resp := &Organizations{}
+	reqURL := d.buildBetaURL("organization", nil)
+	err := d.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
+	if err != nil {
+		return nil, fmt.Errorf("baton-microsoft-entra: failed to get organization ID: %w", err)
+	}
+
+	organizationIDs := []string{}
+	for _, org := range resp.Value {
+		organizationIDs = append(organizationIDs, org.ID)
+	}
+
+	return organizationIDs, nil
 }
 
 // New returns a new instance of the connector.
