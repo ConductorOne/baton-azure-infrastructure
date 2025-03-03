@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
-	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"slices"
 	"strings"
+
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
+	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -191,7 +192,6 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	//
 	// NOTE #2: This applies to both the members and owners endpoints.
 	if b.Current() == nil {
-
 		b.Push(pagination.PageState{
 			ResourceTypeID: ownersStr,
 		})

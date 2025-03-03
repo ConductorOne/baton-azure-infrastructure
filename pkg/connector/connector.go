@@ -3,9 +3,10 @@ package connector
 import (
 	"context"
 	"fmt"
-	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"io"
 	"net/http"
+
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
 	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
