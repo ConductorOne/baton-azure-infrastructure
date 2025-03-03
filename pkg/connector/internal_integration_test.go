@@ -3,11 +3,12 @@ package connector
 import (
 	"context"
 	"fmt"
-	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
@@ -40,9 +41,7 @@ func TestUserBuilderList(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	u := &userBuilder{
-		conn: &connTest,
-	}
+	u := newUserBuilder(connTest)
 	res, _, _, err := u.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
 	require.NotNil(t, res)
@@ -79,9 +78,7 @@ func TestSubscriptionBuilderList(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	s := &subscriptionBuilder{
-		conn: &connTest,
-	}
+	s := newSubscriptionBuilder(connTest)
 	_, _, _, err = s.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
 }
@@ -94,9 +91,7 @@ func TestTenantBuilderList(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	tn := &tenantBuilder{
-		conn: &connTest,
-	}
+	tn := newTenantBuilder(connTest)
 	_, _, _, err = tn.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
 }
@@ -109,9 +104,7 @@ func TestResourceGroupBuilderList(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	rg := &resourceGroupBuilder{
-		conn: &connTest,
-	}
+	rg := newResourceGroupBuilder(connTest)
 	_, _, _, err = rg.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
 }
@@ -124,9 +117,7 @@ func TestRoleAssignmentResourceGroupBuilderList(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	ra := &roleAssignmentResourceGroupBuilder{
-		conn: &connTest,
-	}
+	ra := newRoleAssignmentResourceGroupBuilder(connTest)
 	_, _, _, err = ra.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
 }
@@ -138,9 +129,7 @@ func TestRoleBuilderList(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	r := &roleBuilder{
-		conn: &connTest,
-	}
+	r := newRoleBuilder(connTest)
 	_, _, _, err = r.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
 }
@@ -153,11 +142,9 @@ func TestRoleGrants(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	r := &roleBuilder{
-		conn: &connTest,
-	}
+	r := newRoleBuilder(connTest)
 
-	lstRoles, err := getAllRoles(ctxTest, &connTest, subscriptionIDForTesting)
+	lstRoles, err := getAllRoles(ctxTest, connTest, subscriptionIDForTesting)
 	require.Nil(t, err)
 
 	for _, rl := range lstRoles {
@@ -166,7 +153,7 @@ func TestRoleGrants(t *testing.T) {
 			subscriptionIDForTesting,
 			rl,
 		)
-		rs, err := roleResource(ctxTest, &armauthorization.RoleDefinition{
+		resource, err := roleResource(ctxTest, &armauthorization.RoleDefinition{
 			ID: &roleDefinitionID,
 			Properties: &armauthorization.RoleDefinitionProperties{
 				RoleName:    &rl,
@@ -176,7 +163,7 @@ func TestRoleGrants(t *testing.T) {
 		}, nil)
 		require.Nil(t, err)
 
-		_, _, _, err = r.Grants(ctxTest, rs, nil)
+		_, _, _, err = r.Grants(ctxTest, resource, nil)
 		require.Nil(t, err)
 	}
 }
@@ -189,10 +176,8 @@ func TestRoleAssignmentResourceGroupGrants(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	r := &roleAssignmentResourceGroupBuilder{
-		conn: &connTest,
-	}
-	lstResourceGroups, err := getResourceGroups(ctxTest, &connTest)
+	r := newRoleAssignmentResourceGroupBuilder(connTest)
+	lstResourceGroups, err := getResourceGroups(ctxTest, connTest)
 	require.Nil(t, err)
 
 	for _, rg := range lstResourceGroups {
@@ -218,9 +203,7 @@ func TestSubscriptionGrants(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	s := &subscriptionBuilder{
-		conn: &connTest,
-	}
+	s := newSubscriptionBuilder(connTest)
 	res, err := rs.NewResource(
 		"Azure subscription 1",
 		subscriptionsResourceType,
@@ -325,9 +308,7 @@ func TestRoleGrant(t *testing.T) {
 	require.Nil(t, err)
 
 	entitlement := getEntitlementForTesting(resource, grantPrincipalType, roleEntitlement)
-	g := &roleBuilder{
-		conn: &connTest,
-	}
+	g := newRoleBuilder(connTest)
 	_, err = g.Grant(ctxTest, &v2.Resource{
 		Id: &v2.ResourceId{
 			ResourceType: userResourceType.Id,
@@ -365,9 +346,7 @@ func TestRoleRevoke(t *testing.T) {
 	gr.Annotations = annos
 	require.NotNil(t, gr)
 
-	l := &roleBuilder{
-		conn: &connTest,
-	}
+	l := newRoleBuilder(connTest)
 	_, err = l.Revoke(ctxTest, gr)
 	require.Nil(t, err)
 }
@@ -401,9 +380,7 @@ func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
 	require.Nil(t, err)
 
 	entitlement := getEntitlementForTesting(resource, grantPrincipalType, roleEntitlement)
-	g := &roleAssignmentResourceGroupBuilder{
-		conn: &connTest,
-	}
+	g := newRoleAssignmentResourceGroupBuilder(connTest)
 	_, err = g.Grant(ctxTest, &v2.Resource{
 		Id: &v2.ResourceId{
 			ResourceType: userResourceType.Id,
@@ -441,9 +418,7 @@ func TestRoleAssignmentResourceGroupRevoke(t *testing.T) {
 	gr.Annotations = annos
 	require.NotNil(t, gr)
 
-	l := &roleAssignmentResourceGroupBuilder{
-		conn: &connTest,
-	}
+	l := newRoleAssignmentResourceGroupBuilder(connTest)
 	_, err = l.Revoke(ctxTest, gr)
 	require.Nil(t, err)
 }
@@ -456,15 +431,13 @@ func TestResourceGroupEntitlements(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	rg := &roleAssignmentResourceGroupBuilder{
-		conn: &connTest,
-	}
+	rg := newRoleAssignmentResourceGroupBuilder(connTest)
 
-	lstResourceGroups, err := getResourceGroups(ctxTest, &connTest)
+	lstResourceGroups, err := getResourceGroups(ctxTest, connTest)
 	require.Nil(t, err)
 
 	for _, rgs := range lstResourceGroups {
-		rs, err := roleAssignmentResourceGroupResource(ctxTest,
+		assignmentResourceGroupResource, err := roleAssignmentResourceGroupResource(ctxTest,
 			subscriptionIDForTesting,
 			roleForTesting,
 			&armresources.ResourceGroup{
@@ -473,7 +446,7 @@ func TestResourceGroupEntitlements(t *testing.T) {
 			}, nil)
 		require.Nil(t, err)
 
-		_, _, _, err = rg.Entitlements(ctxTest, rs, nil)
+		_, _, _, err = rg.Entitlements(ctxTest, assignmentResourceGroupResource, nil)
 		require.Nil(t, err)
 	}
 }
@@ -488,7 +461,7 @@ func TestGetPrincipalType(t *testing.T) {
 	require.Nil(t, err)
 
 	principalID := grantPrincipalForTesting
-	_, err = getPrincipalType(ctxTest, &connTest, principalID)
+	_, err = getPrincipalType(ctxTest, connTest, principalID)
 	require.Nil(t, err)
 }
 
@@ -500,7 +473,7 @@ func TestListAllRoles(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	_, err = getAllRoles(ctxTest, &connTest, "")
+	_, err = getAllRoles(ctxTest, connTest, "")
 	require.Nil(t, err)
 }
 
@@ -515,7 +488,7 @@ func TestEnterpriseApplicationsGrants(t *testing.T) {
 	s := newEnterpriseApplicationsBuilder(connTest)
 
 	reqURL := connTest.buildURL("servicePrincipals", setEnterpriseApplicationsKeys())
-	resp := &servicePrincipalsList{}
+	resp := &client.ServicePrincipalsList{}
 	err = connTest.query(ctxTest, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	require.Nil(t, err)
 

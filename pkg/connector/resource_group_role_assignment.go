@@ -24,6 +24,12 @@ type roleAssignmentResourceGroupBuilder struct {
 	conn *Connector
 }
 
+func newRoleAssignmentResourceGroupBuilder(conn *Connector) *roleAssignmentResourceGroupBuilder {
+	return &roleAssignmentResourceGroupBuilder{
+		conn: conn,
+	}
+}
+
 const invalidRoleID = "invalid role id"
 
 func (ra *roleAssignmentResourceGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {

@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"net/http"
 	"net/mail"
 	"net/url"
 	"path"
 	"slices"
 	"strings"
+
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"

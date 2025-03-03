@@ -21,7 +21,7 @@ var servicePrincipalSelect = []string{
 	"tags",
 }
 
-// ListServicePrincipals represents a list of service principals, nextLink is used to get the next page of results
+// ListServicePrincipals represents a list of service principals, nextLink is used to get the next page of results.
 func (a *AzureClient) ListServicePrincipals(ctx context.Context, nextLink string) (*ServicePrincipalsList, error) {
 	nextLink = NewAzureQueryBuilder().
 		// TODO: Validate if is V1 or BETA
