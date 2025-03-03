@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"io"
 	"net/http"
 
@@ -25,6 +26,7 @@ type Connector struct {
 	organizationIDs       []string
 	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
 	clientFactory         *armsubscription.ClientFactory
+	client                *client.AzureClient
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.

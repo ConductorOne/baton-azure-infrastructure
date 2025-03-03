@@ -7,8 +7,6 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
-
-	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
 )
 
 type managedIdentityBuilder struct {
@@ -36,7 +34,7 @@ func (m *managedIdentityBuilder) List(ctx context.Context, parentResourceID *v2.
 		return nil, "", nil, err
 	}
 
-	users, err := slices.ConvertErr(resp.Value, func(mi *servicePrincipal) (*v2.Resource, error) {
+	users, err := ConvertErr(resp.Value, func(mi *servicePrincipal) (*v2.Resource, error) {
 		return managedIdentityResource(ctx, mi, parentResourceID)
 	})
 	if err != nil {

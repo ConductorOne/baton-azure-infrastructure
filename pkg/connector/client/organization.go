@@ -6,12 +6,13 @@ import (
 	"net/http"
 )
 
-func (d *AzureClient) GetOrganizations(ctx context.Context) ([]Organization, error) {
+func (a *AzureClient) GetOrganizations(ctx context.Context) ([]Organization, error) {
 	resp := Organizations{}
-	reqURL := d.buildBetaURL("organization", nil)
-	err := d.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, &resp)
+
+	reqURL := NewAzureQueryBuilder().BuildUrl("organization")
+	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, reqURL, nil, &resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-microsoft-entra: failed to get organization ID: %w", err)
+		return nil, fmt.Errorf("baton-azure-infrastructure: failed to get organization ID: %w", err)
 	}
 
 	return resp.Value, nil

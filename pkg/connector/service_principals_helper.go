@@ -7,6 +7,7 @@ import (
 
 const (
 	ownersStr     = "owners"
+	appRoleStr    = "appRole"
 	assignmentStr = "assignment"
 )
 

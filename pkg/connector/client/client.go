@@ -35,6 +35,8 @@ type AzureClient struct {
 	token         azcore.TokenCredential
 	httpClient    *uhttp.BaseHttpClient
 	clientFactory *armsubscription.ClientFactory
+	// TODO: add skipAdGroups to the NewMethod
+	skipAdGroups bool
 }
 
 func NewAzureClient(
@@ -59,7 +61,7 @@ func NewAzureClient(
 	}, nil
 }
 
-func (c *AzureClient) buildBetaURL(reqPath string, v url.Values) string {
+func (a *AzureClient) buildBetaURL(reqPath string, v url.Values) string {
 	ux := url.URL{
 		Scheme:   "https",
 		Host:     apiDomain,
@@ -69,7 +71,7 @@ func (c *AzureClient) buildBetaURL(reqPath string, v url.Values) string {
 	return ux.String()
 }
 
-func (c *AzureClient) doRequest(ctx context.Context,
+func (a *AzureClient) doRequest(ctx context.Context,
 	method,
 	endpointUrl string,
 	token string,
@@ -91,7 +93,7 @@ func (c *AzureClient) doRequest(ctx context.Context,
 		reqOpts = append(reqOpts, uhttp.WithJSONBody(body))
 	}
 
-	req, err := c.httpClient.NewRequest(ctx,
+	req, err := a.httpClient.NewRequest(ctx,
 		method,
 		urlAddress,
 		reqOpts...,
@@ -105,7 +107,7 @@ func (c *AzureClient) doRequest(ctx context.Context,
 		opts = append(opts, uhttp.WithResponse(res))
 	}
 
-	resp, err := c.httpClient.Do(req, opts...)
+	resp, err := a.httpClient.Do(req, opts...)
 	if err != nil {
 		return err
 	}
@@ -115,7 +117,7 @@ func (c *AzureClient) doRequest(ctx context.Context,
 	return nil
 }
 
-func (c *AzureClient) query(
+func (a *AzureClient) requestWithToken(
 	ctx context.Context,
 	scopes []string,
 	method,
@@ -123,14 +125,14 @@ func (c *AzureClient) query(
 	body interface{},
 	res interface{},
 ) error {
-	token, err := c.token.GetToken(ctx, policy.TokenRequestOptions{
+	token, err := a.token.GetToken(ctx, policy.TokenRequestOptions{
 		Scopes: scopes,
 	})
 	if err != nil {
 		return err
 	}
 
-	err = c.doRequest(ctx, method, requestURL, token.Token, res, body)
+	err = a.doRequest(ctx, method, requestURL, token.Token, res, body)
 	if err != nil {
 		return err
 	}
@@ -138,13 +140,13 @@ func (c *AzureClient) query(
 	return nil
 }
 
-func (c *AzureClient) FromQueryBuilder(
+func (a *AzureClient) FromQueryBuilder(
 	ctx context.Context,
 	builder AzureQueryBuilder,
 	path string,
 	res interface{},
 ) error {
-	err := c.query(ctx, graphReadScopes, http.MethodGet, builder.BuildBetaUrl(path), nil, res)
+	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, builder.BuildUrl(path), nil, res)
 	if err != nil {
 		return err
 	}

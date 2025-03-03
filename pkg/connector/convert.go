@@ -1,4 +1,4 @@
-package slices
+package connector
 
 // Convert accepts a list of T and returns a list of R based on the input func.
 func Convert[T any, R comparable](slice []T, f func(in T) R) []R {

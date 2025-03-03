@@ -6,7 +6,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -51,7 +50,7 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 
 	// If mailboxSettings is disabled, we can return the users without checking mailboxSettings.
 	if !usr.conn.MailboxSettings {
-		users, err := slices.ConvertErr(resp.Users, func(user *user) (*v2.Resource, error) {
+		users, err := ConvertErr(resp.Users, func(user *user) (*v2.Resource, error) {
 			return userResource(ctx, user, parentResourceID)
 		})
 		if err != nil {
