@@ -5,19 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"net/http"
 	"net/mail"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
-	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
-	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
-	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	pagination "github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	expSlices "golang.org/x/exp/slices"
 )
@@ -216,7 +217,7 @@ func groupURL(g *group) string {
 }
 
 func groupTypeValue(g *group) string {
-	if expSlices.Contains(g.GroupTypes, "Unified") {
+	if slices.Contains(g.GroupTypes, "Unified") {
 		return "microsoft_365"
 	}
 
@@ -236,7 +237,7 @@ func groupTypeValue(g *group) string {
 }
 
 func membershipTypeValue(g *group) string {
-	if expSlices.Contains(g.GroupTypes, "DynamicMembership") {
+	if slices.Contains(g.GroupTypes, "DynamicMembership") {
 		return "dynamic"
 	}
 
@@ -288,7 +289,7 @@ func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, per
 }
 
 func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Resource, g *groupBuilder, ps *pagination.PageState) ([]*v2.Grant, error) {
-	grants, err := slices.ConvertErr(resp.Members, func(gm *membership) (*v2.Grant, error) {
+	grants, err := ConvertErr(resp.Members, func(gm *membership) (*v2.Grant, error) {
 		var annos annotations.Annotations
 		objectID := resource.Id.GetResource()
 		rid := &v2.ResourceId{Resource: gm.Id}
@@ -609,7 +610,7 @@ func setEnterpriseApplicationsKeys() url.Values {
 	return v
 }
 
-func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func enterpriseApplicationResource(ctx context.Context, app *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := make(map[string]interface{})
 	profile["id"] = app.ID
 	profile["app_id"] = app.AppId
@@ -640,13 +641,13 @@ func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, p
 	// }
 
 	ret, err := rs.NewAppResource(
-		app.getDisplayName(),
+		app.GetDisplayName(),
 		enterpriseApplicationResourceType,
 		app.ID,
 		options,
 		rs.WithParentResourceID(parentResourceID),
 		rs.WithAnnotation(&v2.ExternalLink{
-			Url: app.externalURL(),
+			Url: app.ExternalURL(),
 		}),
 	)
 	if err != nil {

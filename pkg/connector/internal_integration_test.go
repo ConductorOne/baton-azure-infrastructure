@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"net/http"
 	"os"
 	"strings"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
-	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -56,24 +56,19 @@ func TestGroupBuilderList(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	u := &groupBuilder{
-		conn: &connTest,
-	}
+	u := newGroupBuilder(connTest)
 	res, _, _, err := u.List(ctxTest, &v2.ResourceId{}, &pagination.Token{})
 	require.Nil(t, err)
 	require.NotNil(t, res)
 }
 
-func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecret, entraClientId string) (Connector, error) {
-	useCliCredentials := false
-	mailboxSettings := false
-	skipAdGroups := false
-	cb, err := New(ctx, useCliCredentials, entraTenantId, entraClientId, entraClientSecret, mailboxSettings, skipAdGroups)
+func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecret, entraClientId string) (*Connector, error) {
+	cb, err := New(ctx, false, entraTenantId, entraClientId, entraClientSecret, false, false)
 	if err != nil {
-		return Connector{}, err
+		return nil, err
 	}
 
-	return *cb, nil
+	return cb, nil
 }
 
 func TestSubscriptionBuilderList(t *testing.T) {
@@ -517,15 +512,14 @@ func TestEnterpriseApplicationsGrants(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.Nil(t, err)
 
-	s := &enterpriseApplicationsBuilder{
-		conn: &connTest,
-	}
+	s := newEnterpriseApplicationsBuilder(connTest)
+
 	reqURL := connTest.buildURL("servicePrincipals", setEnterpriseApplicationsKeys())
 	resp := &servicePrincipalsList{}
 	err = connTest.query(ctxTest, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	require.Nil(t, err)
 
-	entApps, err := slices.ConvertErr(resp.Value, func(app *servicePrincipal) (*v2.Resource, error) {
+	entApps, err := ConvertErr(resp.Value, func(app *client.ServicePrincipal) (*v2.Resource, error) {
 		return enterpriseApplicationResource(ctxTest, app, nil)
 	})
 	require.Nil(t, err)

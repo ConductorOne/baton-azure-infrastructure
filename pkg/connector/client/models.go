@@ -1,5 +1,10 @@
 package client
 
+import (
+	"fmt"
+	"net/url"
+)
+
 type Manager struct {
 	Id          string `json:"id,omitempty"`
 	EmployeeId  string `json:"employeeId,omitempty"`
@@ -125,4 +130,26 @@ type AppRoleAssignment struct {
 	PrincipalType        string `json:"principalType"` // The type of the assigned principal. This can either be User, Group, or ServicePrincipal. Read-only.
 	ResourceDisplayName  string `json:"resourceDisplayName"`
 	ResourceId           string `json:"resourceId"`
+}
+
+func (sp *ServicePrincipal) GetDisplayName() string {
+	if sp.DisplayName != "" {
+		return sp.DisplayName
+	}
+
+	return sp.AppDisplayName
+}
+
+func (sp *ServicePrincipal) ExternalURL() string {
+	return (&url.URL{
+		Scheme: "https",
+		Host:   "entra.microsoft.com",
+		Path:   "/",
+		Fragment: fmt.Sprintf(
+			"view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/%s/appId/%s/preferredSingleSignOnMode~/null/servicePrincipalType/%s",
+			sp.ID,
+			sp.AppId,
+			sp.ServicePrincipalType,
+		),
+	}).String()
 }
