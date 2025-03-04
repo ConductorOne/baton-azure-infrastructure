@@ -2,15 +2,15 @@ package connector
 
 import (
 	"context"
-	"net/http"
 
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 )
 
 type managedIdentityBuilder struct {
-	conn *Connector
+	client *client.AzureClient
 }
 
 func (m *managedIdentityBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -18,35 +18,19 @@ func (m *managedIdentityBuilder) ResourceType(ctx context.Context) *v2.ResourceT
 }
 
 func (m *managedIdentityBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
+	resp, err := m.client.ListServicePrincipals(ctx, pt.Token)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	reqURL := bag.PageToken()
-	if reqURL == "" {
-		reqURL = m.conn.buildURL("servicePrincipals", setManagedIdentityKeys())
-	}
-
-	resp := &servicePrincipalsList{}
-	err = m.conn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	users, err := ConvertErr(resp.Value, func(mi *servicePrincipal) (*v2.Resource, error) {
+	users, err := ConvertErr(resp.Value, func(mi *client.ServicePrincipal) (*v2.Resource, error) {
 		return managedIdentityResource(ctx, mi, parentResourceID)
 	})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	pageToken, err := bag.NextToken(resp.NextLink)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	return users, pageToken, nil, nil
+	return users, resp.NextLink, nil, nil
 }
 
 // Entitlements always returns an empty slice for managed identities.
@@ -61,6 +45,6 @@ func (m *managedIdentityBuilder) Grants(ctx context.Context, resource *v2.Resour
 
 func newManagedIdentityBuilder(c *Connector) *managedIdentityBuilder {
 	return &managedIdentityBuilder{
-		conn: c,
+		client: c.client,
 	}
 }
