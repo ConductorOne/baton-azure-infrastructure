@@ -26,7 +26,6 @@ import (
 
 const (
 	managerIDProfileKey          = "managerId"
-	employeeNumberProfileKey     = "employeeNumber"
 	managerEmailProfileKey       = "managerEmail"
 	supervisorIDProfileKey       = "supervisorEId"
 	supervisorEmailProfileKey    = "supervisorEmail"
@@ -38,19 +37,22 @@ var graphReadScopes = []string{
 }
 
 // Create a new connector resource for an Entra User.
-func userResource(ctx context.Context, u *user, parentResourceID *v2.ResourceId, userTraitOptions ...rs.UserTraitOption) (*v2.Resource, error) {
+func userResource(ctx context.Context, u *client.User, parentResourceID *v2.ResourceId, userTraitOptions ...rs.UserTraitOption) (*v2.Resource, error) {
 	primaryEmail := fetchEmailAddresses(u.Email, u.UserPrincipalName)
-	profile := make(map[string]interface{})
-	profile["id"] = u.ID
-	profile["mail"] = primaryEmail
-	profile["displayName"] = u.DisplayName
-	profile["title"] = u.JobTitle
-	profile["jobTitle"] = u.JobTitle
-	profile["userPrincipalName"] = u.UserPrincipalName
-	profile["accountEnabled"] = u.AccountEnabled
-	profile["employeeId"] = u.EmployeeID
-	profile[employeeNumberProfileKey] = u.EmployeeID
-	profile["department"] = u.Department
+	profile := map[string]interface{}{
+		"id":                u.ID,
+		"email":             primaryEmail,
+		"displayName":       u.DisplayName,
+		"title":             u.JobTitle,
+		"jobTitle":          u.JobTitle,
+		"userPrincipalName": u.UserPrincipalName,
+		"accountEnabled":    u.AccountEnabled,
+		"employeeId":        u.EmployeeID,
+		// TODO: why are we setting employeeId twice?
+		"employeeNumber": u.EmployeeID,
+		"department":     u.Department,
+	}
+
 	if u.Manager != nil {
 		profile[managerIDProfileKey] = u.Manager.Id
 		profile[managerEmailProfileKey] = u.Manager.Email
@@ -92,7 +94,7 @@ func userResource(ctx context.Context, u *user, parentResourceID *v2.ResourceId,
 	return ret, nil
 }
 
-func userURL(u *user) string {
+func userURL(u *client.User) string {
 	return (&url.URL{
 		Scheme:   "https",
 		Host:     "entra.microsoft.com",

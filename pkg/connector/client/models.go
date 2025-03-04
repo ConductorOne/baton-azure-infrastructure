@@ -29,7 +29,7 @@ type User struct {
 	Manager           *Manager `json:"manager,omitempty"`
 }
 
-type IsersList struct {
+type UsersList struct {
 	Context  string  `json:"@odata.context"`
 	NextLink string  `json:"@odata.nextLink"`
 	Users    []*User `json:"value,omitempty"`
