@@ -9,7 +9,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -63,7 +62,7 @@ func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 		return nil, "", nil, err
 	}
 
-	groups, err := slices.ConvertErr(resp.Groups, func(g *group) (*v2.Resource, error) {
+	groups, err := ConvertErr(resp.Groups, func(g *group) (*v2.Resource, error) {
 		return groupResource(ctx, g, parentResourceID)
 	})
 	if err != nil {

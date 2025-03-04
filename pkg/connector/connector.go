@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
+
 	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -25,6 +27,7 @@ type Connector struct {
 	organizationIDs       []string
 	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
 	clientFactory         *armsubscription.ClientFactory
+	client                *client.AzureClient
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.

@@ -9,22 +9,23 @@ import (
 	"net/mail"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
-	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
-	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
-	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	pagination "github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	expSlices "golang.org/x/exp/slices"
 )
 
 const (
 	managerIDProfileKey          = "managerId"
-	employeeNumberProfileKey     = "employeeNumber"
 	managerEmailProfileKey       = "managerEmail"
 	supervisorIDProfileKey       = "supervisorEId"
 	supervisorEmailProfileKey    = "supervisorEmail"
@@ -36,19 +37,22 @@ var graphReadScopes = []string{
 }
 
 // Create a new connector resource for an Entra User.
-func userResource(ctx context.Context, u *user, parentResourceID *v2.ResourceId, userTraitOptions ...rs.UserTraitOption) (*v2.Resource, error) {
+func userResource(ctx context.Context, u *client.User, parentResourceID *v2.ResourceId, userTraitOptions ...rs.UserTraitOption) (*v2.Resource, error) {
 	primaryEmail := fetchEmailAddresses(u.Email, u.UserPrincipalName)
-	profile := make(map[string]interface{})
-	profile["id"] = u.ID
-	profile["mail"] = primaryEmail
-	profile["displayName"] = u.DisplayName
-	profile["title"] = u.JobTitle
-	profile["jobTitle"] = u.JobTitle
-	profile["userPrincipalName"] = u.UserPrincipalName
-	profile["accountEnabled"] = u.AccountEnabled
-	profile["employeeId"] = u.EmployeeID
-	profile[employeeNumberProfileKey] = u.EmployeeID
-	profile["department"] = u.Department
+	profile := map[string]interface{}{
+		"id":                u.ID,
+		"email":             primaryEmail,
+		"displayName":       u.DisplayName,
+		"title":             u.JobTitle,
+		"jobTitle":          u.JobTitle,
+		"userPrincipalName": u.UserPrincipalName,
+		"accountEnabled":    u.AccountEnabled,
+		"employeeId":        u.EmployeeID,
+		// TODO: why are we setting employeeId twice?
+		"employeeNumber": u.EmployeeID,
+		"department":     u.Department,
+	}
+
 	if u.Manager != nil {
 		profile[managerIDProfileKey] = u.Manager.Id
 		profile[managerEmailProfileKey] = u.Manager.Email
@@ -90,7 +94,7 @@ func userResource(ctx context.Context, u *user, parentResourceID *v2.ResourceId,
 	return ret, nil
 }
 
-func userURL(u *user) string {
+func userURL(u *client.User) string {
 	return (&url.URL{
 		Scheme:   "https",
 		Host:     "entra.microsoft.com",
@@ -216,7 +220,7 @@ func groupURL(g *group) string {
 }
 
 func groupTypeValue(g *group) string {
-	if expSlices.Contains(g.GroupTypes, "Unified") {
+	if slices.Contains(g.GroupTypes, "Unified") {
 		return "microsoft_365"
 	}
 
@@ -236,7 +240,7 @@ func groupTypeValue(g *group) string {
 }
 
 func membershipTypeValue(g *group) string {
-	if expSlices.Contains(g.GroupTypes, "DynamicMembership") {
+	if slices.Contains(g.GroupTypes, "DynamicMembership") {
 		return "dynamic"
 	}
 
@@ -288,7 +292,7 @@ func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, per
 }
 
 func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Resource, g *groupBuilder, ps *pagination.PageState) ([]*v2.Grant, error) {
-	grants, err := slices.ConvertErr(resp.Members, func(gm *membership) (*v2.Grant, error) {
+	grants, err := ConvertErr(resp.Members, func(gm *membership) (*v2.Grant, error) {
 		var annos annotations.Annotations
 		objectID := resource.Id.GetResource()
 		rid := &v2.ResourceId{Resource: gm.Id}
@@ -556,7 +560,7 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 	return "", nil
 }
 
-func managedIdentityResource(ctx context.Context, sp *servicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func managedIdentityResource(ctx context.Context, sp *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := make(map[string]interface{})
 	profile["id"] = sp.ID
 	profile["app_id"] = sp.AppId
@@ -577,13 +581,13 @@ func managedIdentityResource(ctx context.Context, sp *servicePrincipal, parentRe
 		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
 	}
 	ret, err := rs.NewUserResource(
-		sp.getDisplayName(),
+		sp.GetDisplayName(),
 		managedIdentitylResourceType,
 		sp.ID,
 		options,
 		rs.WithParentResourceID(parentResourceID),
 		rs.WithAnnotation(&v2.ExternalLink{
-			Url: sp.externalURL(),
+			Url: sp.ExternalURL(),
 		}),
 	)
 	if err != nil {
@@ -609,7 +613,7 @@ func setEnterpriseApplicationsKeys() url.Values {
 	return v
 }
 
-func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func enterpriseApplicationResource(ctx context.Context, app *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := make(map[string]interface{})
 	profile["id"] = app.ID
 	profile["app_id"] = app.AppId
@@ -640,13 +644,13 @@ func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, p
 	// }
 
 	ret, err := rs.NewAppResource(
-		app.getDisplayName(),
+		app.GetDisplayName(),
 		enterpriseApplicationResourceType,
 		app.ID,
 		options,
 		rs.WithParentResourceID(parentResourceID),
 		rs.WithAnnotation(&v2.ExternalLink{
-			Url: app.externalURL(),
+			Url: app.ExternalURL(),
 		}),
 	)
 	if err != nil {
