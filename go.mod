@@ -2,8 +2,6 @@ module github.com/conductorone/baton-azure-infrastructure
 
 go 1.23
 
-toolchain go1.23.4
-
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.16.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.8.0
