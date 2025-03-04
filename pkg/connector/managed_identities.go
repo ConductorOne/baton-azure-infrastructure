@@ -18,7 +18,7 @@ func (m *managedIdentityBuilder) ResourceType(ctx context.Context) *v2.ResourceT
 }
 
 func (m *managedIdentityBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	resp, err := m.client.ListServicePrincipals(ctx, pt.Token)
+	resp, err := m.client.ListServicePrincipalsManagedIdentity(ctx, pt.Token)
 	if err != nil {
 		return nil, "", nil, err
 	}
