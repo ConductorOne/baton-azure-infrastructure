@@ -52,7 +52,7 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 		}
 	}
 
-	resources := make([]*v2.Resource, 0, len(applicationsOwned))
+	resources := make([]*v2.Resource, len(applicationsOwned))
 
 	for i, app := range applicationsOwned {
 		value, err := enterpriseApplicationResource(ctx, app, parentResourceID)
