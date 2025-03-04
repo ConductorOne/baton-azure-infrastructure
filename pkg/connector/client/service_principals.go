@@ -148,3 +148,22 @@ func (a *AzureClient) ServicePrincipalDeleteAppRoleAssignedTo(ctx context.Contex
 
 	return nil
 }
+
+func (a *AzureClient) ListServicePrincipalsManagedIdentity(ctx context.Context, nextLink string) (*ServicePrincipalsList, error) {
+	nextLink = NewAzureQueryBuilder().
+		// TODO: Validate if is V1 or BETA
+		Version(V1).
+		Add("$select", strings.Join(servicePrincipalSelect, ",")).
+		Add("$filter", "servicePrincipalType eq 'ManagedIdentity'").
+		Add("$top", "999").
+		BuildUrlWithPagination("servicePrincipals", nextLink)
+
+	resp := &ServicePrincipalsList{}
+
+	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, nextLink, nil, resp)
+	if err != nil {
+		return nil, fmt.Errorf("baton-azure-infrastrucure: failed to get service principals: %w", err)
+	}
+
+	return resp, nil
+}
