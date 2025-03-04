@@ -560,7 +560,7 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 	return "", nil
 }
 
-func managedIdentityResource(ctx context.Context, sp *servicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func managedIdentityResource(ctx context.Context, sp *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := make(map[string]interface{})
 	profile["id"] = sp.ID
 	profile["app_id"] = sp.AppId
@@ -581,13 +581,13 @@ func managedIdentityResource(ctx context.Context, sp *servicePrincipal, parentRe
 		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
 	}
 	ret, err := rs.NewUserResource(
-		sp.getDisplayName(),
+		sp.GetDisplayName(),
 		managedIdentitylResourceType,
 		sp.ID,
 		options,
 		rs.WithParentResourceID(parentResourceID),
 		rs.WithAnnotation(&v2.ExternalLink{
-			Url: sp.externalURL(),
+			Url: sp.ExternalURL(),
 		}),
 	)
 	if err != nil {

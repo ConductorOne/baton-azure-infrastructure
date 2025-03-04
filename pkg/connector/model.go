@@ -7,10 +7,6 @@ type manager struct {
 	DisplayName string `json:"displayName,omitempty"`
 }
 
-type mailboxSettings struct {
-	UserPurpose string `json:"userPurpose,omitempty"`
-}
-
 type user struct {
 	ID                string   `json:"id,omitempty"`
 	Email             string   `json:"mail,omitempty"`
@@ -22,12 +18,6 @@ type user struct {
 	EmployeeID        string   `json:"employeeId,omitempty"`
 	Department        string   `json:"department,omitempty"`
 	Manager           *manager `json:"manager,omitempty"`
-}
-
-type usersList struct {
-	Context  string  `json:"@odata.context"`
-	NextLink string  `json:"@odata.nextLink"`
-	Users    []*user `json:"value,omitempty"`
 }
 
 // https://learn.microsoft.com/en-us/graph/api/resources/group?view=graph-rest-1.0#properties
