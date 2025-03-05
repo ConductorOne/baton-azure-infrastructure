@@ -12,7 +12,7 @@ Check out [Baton](https://github.com/conductorone/baton) to learn more the proje
 - When you create the application, you will get a `client_id` and a `client_secret`. You will need these to authenticate with the Azure API.
 - Then you will need to get the `tenant_id` of your Azure AD tenant. You can find this in the Azure Entra ID Overview page [here](https://portal.azure.com/#blade/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/Overview).
 
-Finally you will need to set the following environment variables:
+Finally, you will need to set the following environment variables:
 
 ```
 export BATON_AZURE_CLIENT_ID=<client_id>

@@ -3,12 +3,9 @@ package connector
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
@@ -32,6 +29,37 @@ var (
 	roleForTesting             = "11102f94-c441-49e6-a78b-ef80e0188abc"
 	subscriptionIDForTesting   = "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
 )
+
+func NewTestConnector(t *testing.T) (context.Context, *Connector) {
+	ctx := context.Background()
+
+	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
+		t.Skip("Skipping test because BATON_AZURE_CLIENT_ID, BATON_AZURE_CLIENT_SECRET, and BATON_AZURE_TENANT_ID are not set")
+	}
+
+	connTest, err := getConnectorForTesting(ctx, azureTenantId, azureClientSecret, azureClientId)
+	require.Nil(t, err)
+
+	return ctx, connTest
+}
+
+func TestEnterpriseCalls(t *testing.T) {
+	ctx, connTest := NewTestConnector(t)
+
+	principals, err := connTest.client.ListServicePrincipals(ctx, "")
+	require.NoError(t, err)
+	require.NotNil(t, principals)
+
+	for _, principal := range principals.Value {
+		if principal.AppRolesAssignedTo != nil && len(principal.AppRolesAssignedTo) != 0 {
+			for _, roleAssignment := range principal.AppRolesAssignedTo {
+				if roleAssignment.AppRoleId == "00000000-0000-0000-0000-000000000000" {
+					t.Log("RoleAssignment: ", roleAssignment)
+				}
+			}
+		}
+	}
+}
 
 func TestUserBuilderList(t *testing.T) {
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
@@ -475,30 +503,4 @@ func TestListAllRoles(t *testing.T) {
 
 	_, err = getAllRoles(ctxTest, connTest, "")
 	require.Nil(t, err)
-}
-
-func TestEnterpriseApplicationsGrants(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.Nil(t, err)
-
-	s := newEnterpriseApplicationsBuilder(connTest)
-
-	reqURL := connTest.buildURL("servicePrincipals", setEnterpriseApplicationsKeys())
-	resp := &client.ServicePrincipalsList{}
-	err = connTest.query(ctxTest, graphReadScopes, http.MethodGet, reqURL, nil, resp)
-	require.Nil(t, err)
-
-	entApps, err := ConvertErr(resp.Value, func(app *client.ServicePrincipal) (*v2.Resource, error) {
-		return enterpriseApplicationResource(ctxTest, app, nil)
-	})
-	require.Nil(t, err)
-
-	for _, res := range entApps {
-		_, _, _, err = s.Grants(ctxTest, res, &pagination.Token{})
-		require.Nil(t, err)
-	}
 }

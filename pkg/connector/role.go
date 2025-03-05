@@ -6,40 +6,23 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 
-	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
-	uuid "github.com/google/uuid"
+	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	zap "go.uber.org/zap"
+	"go.uber.org/zap"
 )
 
 type roleBuilder struct {
 	conn                  *Connector
 	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
-	// key subscriptionID
-	// value array of role assignments for that subscriptionID
-	subIdRoleAssignmentsCache map[string][]*armauthorization.RoleAssignment
-	mu                        sync.RWMutex
-}
-
-func (r *roleBuilder) cacheGet(id string) ([]*armauthorization.RoleAssignment, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	value, ok := r.subIdRoleAssignmentsCache[id]
-	return value, ok
-}
-
-func (r *roleBuilder) cacheSet(id string, value []*armauthorization.RoleAssignment) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.subIdRoleAssignmentsCache[id] = value
+	cache                 *GenericCache[[]*armauthorization.RoleAssignment]
 }
 
 func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -116,7 +99,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 		return nil, "", nil, err
 	}
 
-	assignments, _ := r.cacheGet(subscriptionID)
+	assignments, _ := r.cache.Get(subscriptionID)
 	for _, assignment := range assignments {
 		roleDefinitionID := fmt.Sprintf(
 			"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
@@ -283,14 +266,14 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 
 func newRoleBuilder(c *Connector) *roleBuilder {
 	return &roleBuilder{
-		conn:                      c,
-		roleDefinitionsClient:     c.roleDefinitionsClient,
-		subIdRoleAssignmentsCache: make(map[string][]*armauthorization.RoleAssignment),
+		conn:                  c,
+		roleDefinitionsClient: c.roleDefinitionsClient,
+		cache:                 NewGenericCache[[]*armauthorization.RoleAssignment](),
 	}
 }
 
 func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID string) error {
-	if _, ok := r.cacheGet(subscriptionID); ok {
+	if _, ok := r.cache.Get(subscriptionID); ok {
 		return nil
 	}
 
@@ -308,8 +291,8 @@ func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID s
 			return err
 		}
 
-		assignments, _ := r.cacheGet(subscriptionID)
-		r.cacheSet(subscriptionID, append(assignments, page.Value...))
+		assignments, _ := r.cache.Get(subscriptionID)
+		r.cache.Set(subscriptionID, append(assignments, page.Value...))
 	}
 
 	return nil

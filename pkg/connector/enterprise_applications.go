@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/conductorone/baton-sdk/pkg/types/grant"
+
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 
@@ -15,6 +17,12 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
+)
+
+const (
+	ownersStr     = "owners"
+	appRoleStr    = "appRole"
+	assignmentStr = "assignment"
 )
 
 type enterpriseApplicationsBuilder struct {
@@ -72,55 +80,62 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 }
 
 func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	ownersEntId := enterpriseApplicationsEntitlementId{
-		Type:     ownersStr,
-		Resource: resource.Id.Resource,
-	}
-
-	// Most people are assigned directly to app roles but some people could be assigned
-	// to the app directly
-	// normally this happens by assigning someone access to an app while the app has roles
-	// but it's possible the app then gets roles, meaning we have someone with the default assignment
-	// and then someone with a specific role assignment
-	defaultAppRoleAssignmentStringer := enterpriseApplicationsEntitlementId{
-		Type:      "appRole",
-		Resource:  resource.Id.Resource,
-		AppRoleId: defaultAppRoleAssignmentID,
-	}
-
 	var err error
-	ownersEntIdString, err := ownersEntId.MarshalString()
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	defaultAppRoleAssignmentStringerString, err := defaultAppRoleAssignmentStringer.MarshalString()
-	if err != nil {
-		return nil, "", nil, err
-	}
 
 	// https://learn.microsoft.com/en-us/graph/api/resources/approleassignment?view=graph-rest-1.0
-	rv := []*v2.Entitlement{
-		{
-			Id:          ownersEntIdString,
-			Resource:    resource,
-			DisplayName: fmt.Sprintf("%s Application Owner", resource.DisplayName),
-			Description: fmt.Sprintf("Owner of %s Application", resource.DisplayName),
-			GrantableTo: []*v2.ResourceType{userResourceType},
-			Purpose:     v2.Entitlement_PURPOSE_VALUE_PERMISSION,
-			Slug:        "owner",
-		},
+	var rv []*v2.Entitlement
+
+	{
+		ownersEntId := enterpriseApplicationsEntitlementId{
+			Type:     ownersStr,
+			Resource: resource.Id.Resource,
+		}
+
+		ownersEntIdString, err := ownersEntId.MarshalString()
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		ent := entitlement.NewPermissionEntitlement(
+			resource,
+			ownersEntIdString,
+			entitlement.WithGrantableTo(userResourceType),
+			entitlement.WithDisplayName(fmt.Sprintf("%s Application Owner", resource.DisplayName)),
+			entitlement.WithDescription(fmt.Sprintf("Owner of %s Application", resource.DisplayName)),
+		)
+		ent.Slug = "owner"
+		rv = append(rv, ent)
+	}
+
+	{
 		// NOTE:
 		// "00000000-0000-0000-0000-000000000000" is the principal ID for the default app role.
-		{
-			Id:          defaultAppRoleAssignmentStringerString,
-			Resource:    resource,
-			DisplayName: fmt.Sprintf("%s Application Assignment", resource.DisplayName),
-			Description: fmt.Sprintf("Assigned to %s Application", resource.DisplayName),
-			GrantableTo: []*v2.ResourceType{userResourceType, groupResourceType},
-			Purpose:     v2.Entitlement_PURPOSE_VALUE_ASSIGNMENT,
-			Slug:        "assigned",
-		},
+
+		// Most people are assigned directly to app roles but some people could be assigned
+		// to the app directly
+		// normally this happens by assigning someone access to an app while the app has roles
+		// but it's possible the app then gets roles, meaning we have someone with the default assignment
+		// and then someone with a specific role assignment
+		defaultAppRoleAssignmentStringer := enterpriseApplicationsEntitlementId{
+			Type:      appRoleStr,
+			Resource:  resource.Id.Resource,
+			AppRoleId: defaultAppRoleAssignmentID,
+		}
+
+		defaultAppRoleAssignmentStringerString, err := defaultAppRoleAssignmentStringer.MarshalString()
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		ent := entitlement.NewAssignmentEntitlement(
+			resource,
+			defaultAppRoleAssignmentStringerString,
+			entitlement.WithGrantableTo(userResourceType, groupResourceType),
+			entitlement.WithDisplayName(fmt.Sprintf("%s Application Assignment", resource.DisplayName)),
+			entitlement.WithDescription(fmt.Sprintf("Assigned to %s Application", resource.DisplayName)),
+		)
+		ent.Slug = "assigned"
+		rv = append(rv, ent)
 	}
 
 	principalId := resource.Id.Resource
@@ -139,7 +154,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 		}
 
 		appRoleAssignmentId := enterpriseApplicationsEntitlementId{
-			Type:      "appRole",
+			Type:      appRoleStr,
 			Resource:  resource.Id.Resource,
 			AppRoleId: appRole.Id,
 		}
@@ -169,8 +184,9 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 	return rv, "", nil, nil
 }
 
-// Grants always returns an empty slice for users since they don't have any entitlements.
 func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
 	b := &pagination.Bag{}
 	err := b.Unmarshal(pt.Token)
 	if err != nil {
@@ -211,47 +227,47 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 		}
 
 		resp := principalResp.AppRolesAssignedTo
-		grants, err := ConvertErr(resp, func(ara *client.AppRoleAssignment) (*v2.Grant, error) {
-			var annos annotations.Annotations
-			rid := &v2.ResourceId{Resource: ara.PrincipalId}
-			switch ara.PrincipalType {
+		grants, err := ConvertErr(resp, func(appRoleAssignment *client.AppRoleAssignment) (*v2.Grant, error) {
+			var options []grant.GrantOption
+
+			rid := &v2.ResourceId{Resource: appRoleAssignment.PrincipalId}
+			switch appRoleAssignment.PrincipalType {
 			case "User":
 				rid.ResourceType = userResourceType.Id
 			case "Group":
 				rid.ResourceType = groupResourceType.Id
-				annos.Update(&v2.GrantExpandable{
+
+				options = append(options, grant.WithAnnotation(&v2.GrantExpandable{
 					EntitlementIds: []string{
-						fmt.Sprintf("group:%s:members", ara.PrincipalId),
+						fmt.Sprintf("group:%s:members", appRoleAssignment.PrincipalId),
 					},
 					Shallow:         true,
 					ResourceTypeIds: []string{userResourceType.Id},
-				})
+				}))
 			case "ServicePrincipal":
 				// TODO: service principals can be managed identities, enterprise applications, or maybe something else entirely.
 				// We need to figure out the resource type instead of hard coding it to be a managed identity.
 				rid.ResourceType = managedIdentitylResourceType.Id
 				// rid.ResourceType = enterpriseApplicationResourceType.Id
+			default:
+				l.Error("baton-azure-infrastructure: unsupported PrincipalType type on app role assignment", zap.String("principal_type", appRoleAssignment.PrincipalType))
 			}
-			ur := &v2.Resource{Id: rid}
-			return &v2.Grant{
-				Id: ara.Id,
-				Entitlement: &v2.Entitlement{
-					Id: fmt.Sprintf("enterprise_application:%s:assignment:%s",
-						resource.Id.Resource,
-						ara.AppRoleId,
-					),
-					Resource: resource,
-				},
-				Principal:   ur,
-				Annotations: annos,
-			}, nil
+
+			return grant.NewGrant(
+				resource,
+				fmt.Sprintf("%s:assignment:%s",
+					resource.Id.Resource,
+					appRoleAssignment.AppRoleId,
+				),
+				rid,
+				options...,
+			), nil
 		})
 		if err != nil {
 			return nil, "", nil, err
 		}
 		return grants, "", nil, err
 	case ownersStr:
-
 		resp, err := e.client.ServicePrincipalOwners(ctx, principalId)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
@@ -347,7 +363,6 @@ func (id *enterpriseApplicationsEntitlementId) MarshalString() (string, error) {
 	case appRoleStr:
 		return strings.Join(
 			[]string{
-				"enterprise_application",
 				id.Resource,
 				assignmentStr,
 				id.AppRoleId,
@@ -356,7 +371,6 @@ func (id *enterpriseApplicationsEntitlementId) MarshalString() (string, error) {
 	case ownersStr:
 		return strings.Join(
 			[]string{
-				"enterprise_application",
 				id.Resource,
 				ownersStr,
 			},

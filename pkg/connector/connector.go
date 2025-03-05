@@ -71,7 +71,7 @@ func NewConnectorFromToken(ctx context.Context,
 	mailboxSettings bool,
 	skipAdGroups bool,
 ) (*Connector, error) {
-	client, err := uhttp.NewBaseHttpClientWithContext(ctx, httpClient)
+	baseClient, err := uhttp.NewBaseHttpClientWithContext(ctx, httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -81,12 +81,18 @@ func NewConnectorFromToken(ctx context.Context,
 		return nil, err
 	}
 
+	azureClient, err := client.NewAzureClient(ctx, httpClient, token)
+	if err != nil {
+		return nil, err
+	}
+
 	c := &Connector{
 		token:           token,
-		httpClient:      client,
+		httpClient:      baseClient,
 		MailboxSettings: mailboxSettings,
 		SkipAdGroups:    skipAdGroups,
 		clientFactory:   clientFactory,
+		client:          azureClient,
 	}
 
 	organizationIDs, err := c.getOrganizationIDs(ctx)
