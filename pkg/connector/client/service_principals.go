@@ -45,6 +45,7 @@ func (a *AzureClient) ListServicePrincipals(ctx context.Context, nextLink string
 func (a *AzureClient) ServicePrincipal(ctx context.Context, id string) (*ServicePrincipal, error) {
 	url := NewAzureQueryBuilder().
 		Version(Beta).
+		Add("$expand", "appRoleAssignedTo").
 		BuildUrl("servicePrincipals", id)
 
 	resp := &ServicePrincipal{}
