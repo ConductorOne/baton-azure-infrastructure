@@ -45,7 +45,7 @@ func (q *AzureQueryBuilder) BuildUrl(reqPaths ...string) string {
 		values[key] = value
 	}
 
-	urls := []string{apiDomain}
+	urls := []string{string(q.apiVersion)}
 	urls = append(urls, reqPaths...)
 
 	ux := url.URL{
@@ -70,7 +70,7 @@ func (q *AzureQueryBuilder) BuildUrlWithPagination(reqPath string, nextLink stri
 	ux := url.URL{
 		Scheme:   "https",
 		Host:     apiDomain,
-		Path:     path.Join(betaVersion, reqPath),
+		Path:     path.Join(string(q.apiVersion), reqPath),
 		RawQuery: values.Encode(),
 	}
 	return ux.String()

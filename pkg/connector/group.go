@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"net/http"
 	"net/url"
 	"path"
@@ -18,7 +21,8 @@ import (
 )
 
 type groupBuilder struct {
-	conn *Connector
+	conn   *Connector
+	client *client.AzureClient
 }
 
 const (
@@ -40,41 +44,19 @@ func (g *groupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 }
 
 func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, err := parsePageToken(pToken.Token, &v2.ResourceId{ResourceType: groupResourceType.Id})
+	resp, err := g.client.Groups(ctx, pToken.Token)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	reqURL := bag.PageToken()
-	if reqURL == "" {
-		v := setGroupKeys()
-		if g.conn.SkipAdGroups {
-			v.Set("$filter", "(onPremisesSyncEnabled ne true)")
-			v.Set("$count", "true") // Required to prevent MS Graph from returning a 400
-		}
-
-		reqURL = g.conn.buildURL("groups", v)
-	}
-
-	resp := &groupsList{}
-	err = g.conn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	groups, err := ConvertErr(resp.Groups, func(g *group) (*v2.Resource, error) {
+	groups, err := ConvertErr(resp.Groups, func(g *client.Group) (*v2.Resource, error) {
 		return groupResource(ctx, g, parentResourceID)
 	})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	pageToken, err := bag.NextToken(resp.NextLink)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	return groups, pageToken, nil, nil
+	return groups, resp.NextLink, nil, nil
 }
 
 // Entitlements always returns an empty slice for users.
@@ -98,6 +80,7 @@ func (g *groupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ 
 }
 
 func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
 	b := &pagination.Bag{}
 	err := b.Unmarshal(pToken.Token)
 	if err != nil {
@@ -116,36 +99,40 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 	//
 	// NOTE #2: This applies to both the members and owners endpoints.
 	if b.Current() == nil {
-		owenrsQuery := url.Values{}
-		owenrsQuery.Set("$select", strings.Join([]string{"id"}, ","))
-		ownersURL := g.conn.buildBetaURL(path.Join("groups", resource.Id.Resource, "owners"), owenrsQuery)
 		b.Push(pagination.PageState{
 			ResourceTypeID: typeOwners,
-			Token:          ownersURL,
+			Token:          "",
 		})
 
-		memberQuery := setMemberQuery()
-		if g.conn.SkipAdGroups {
-			memberQuery.Set("$filter", "(onPremisesSyncEnabled ne true)")
-			memberQuery.Set("$count", "true") // Required to prevent MS Graph from returning a 400
-		}
-
-		membersURL := g.conn.buildBetaURL(path.Join("groups", resource.Id.Resource, "members"), memberQuery)
 		b.Push(pagination.PageState{
 			ResourceTypeID: typeMembers,
-			Token:          membersURL,
+			Token:          "",
 		})
 	}
 
-	ps := b.Current()
-	resp := &membershipList{}
-	err = g.conn.query(ctx, graphReadScopes, http.MethodGet, ps.Token, nil, resp)
+	ps := b.Pop()
+	if ps == nil {
+		return nil, "", nil, nil
+	}
+
+	groupId := resource.Id.Resource
+	var memberShip *client.MembershipList
+
+	switch ps.ResourceTypeID {
+	case typeOwners:
+		memberShip, err = g.client.GroupOwners(ctx, groupId)
+	case typeMembers:
+		memberShip, err = g.client.GroupMembers(ctx, groupId, ps.Token)
+	default:
+		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: unknown resource type ID %s", ps.ResourceTypeID)
+	}
+
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			ctxzap.Extract(ctx).Warn(
-				"group membership not found (underlying 404)",
-				zap.String("group_id", resource.Id.GetResource()),
-				zap.String("url", ps.Token),
+		if status.Code(err) == codes.NotFound {
+			l.Warn(
+				"group membership not found",
+				zap.String("type", ps.ResourceTypeID),
+				zap.String("group_id", groupId),
 				zap.Error(err),
 			)
 			return nil, "", nil, nil
@@ -154,25 +141,25 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 		return nil, "", nil, err
 	}
 
-	// dubious hack: if we get less than 50 members,
-	// we suspect the NextLink will return an empty set.
-	// this can save us ~50% of all requests when
-	// looking at owners/members of small groups
-	if len(resp.Members) <= 50 {
-		resp.NextLink = ""
+	if memberShip.NextLink != "" {
+		b.Push(pagination.PageState{
+			ResourceTypeID: ps.ResourceTypeID,
+			ResourceID:     ps.ResourceID,
+			Token:          memberShip.NextLink,
+		})
 	}
 
-	pageToken, err := b.NextToken(resp.NextLink)
+	grants, err := getGroupGrants(ctx, memberShip, resource, g, ps)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	grants, err := getGroupGrants(ctx, resp, resource, g, ps)
+	nextToken, err := b.Marshal()
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	return grants, pageToken, nil, nil
+	return grants, nextToken, nil, nil
 }
 
 func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
@@ -264,6 +251,7 @@ func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 
 func newGroupBuilder(c *Connector) *groupBuilder {
 	return &groupBuilder{
-		conn: c,
+		conn:   c,
+		client: c.client,
 	}
 }
