@@ -135,35 +135,7 @@ func fetchEmailAddresses(email string, upn string) string {
 	return primaryEmail
 }
 
-func setUserKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join([]string{
-		"id",
-		"displayName",
-		"mail",
-		"userPrincipalName",
-		"jobTitle",
-		"manager",
-		"accountEnabled",
-		"employeeType",
-		"employeeHireDate",
-		"employeeId",
-		"department",
-	}, ","))
-	v.Set("$expand", "manager($select=id,employeeId,mail,displayName)")
-	v.Set("$top", "999")
-	return v
-}
-
-func setUserResponseKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join([]string{
-		"userPurpose",
-	}, ","))
-	return v
-}
-
-func groupResource(ctx context.Context, g *group, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func groupResource(ctx context.Context, g *client.Group, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"object_id":           g.ID,
 		"group_type":          groupTypeValue(g),
@@ -210,7 +182,7 @@ func IsEmpty(field string) bool {
 	return field == ""
 }
 
-func groupURL(g *group) string {
+func groupURL(g *client.Group) string {
 	return (&url.URL{
 		Scheme:   "https",
 		Host:     "entra.microsoft.com",
@@ -219,7 +191,7 @@ func groupURL(g *group) string {
 	}).String()
 }
 
-func groupTypeValue(g *group) string {
+func groupTypeValue(g *client.Group) string {
 	if slices.Contains(g.GroupTypes, "Unified") {
 		return "microsoft_365"
 	}
@@ -239,7 +211,7 @@ func groupTypeValue(g *group) string {
 	return ""
 }
 
-func membershipTypeValue(g *group) string {
+func membershipTypeValue(g *client.Group) string {
 	if slices.Contains(g.GroupTypes, "DynamicMembership") {
 		return "dynamic"
 	}
@@ -291,8 +263,8 @@ func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, per
 	)
 }
 
-func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Resource, g *groupBuilder, ps *pagination.PageState) ([]*v2.Grant, error) {
-	grants, err := ConvertErr(resp.Members, func(gm *membership) (*v2.Grant, error) {
+func getGroupGrants(ctx context.Context, resp *client.MembershipList, resource *v2.Resource, g *groupBuilder, ps *pagination.PageState) ([]*v2.Grant, error) {
+	grants, err := ConvertErr(resp.Members, func(gm *client.Membership) (*v2.Grant, error) {
 		var annos annotations.Annotations
 		objectID := resource.Id.GetResource()
 		rid := &v2.ResourceId{Resource: gm.Id}
