@@ -29,6 +29,7 @@ func (a *AzureClient) ListServicePrincipals(ctx context.Context, nextLink string
 		Add("$select", strings.Join(servicePrincipalSelect, ",")).
 		Add("$filter", "servicePrincipalType eq 'Application' AND accountEnabled eq true").
 		Add("$top", "999").
+		Add("$expand", "appRoleAssignedTo").
 		BuildUrlWithPagination("servicePrincipals", nextLink)
 
 	resp := &ServicePrincipalsList{}
@@ -162,7 +163,7 @@ func (a *AzureClient) ListServicePrincipalsManagedIdentity(ctx context.Context, 
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, nextLink, nil, resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-azure-infrastrucure: failed to get service principals: %w", err)
+		return nil, fmt.Errorf("baton-azure-infrastrucure: failed to get service principals managed: %w", err)
 	}
 
 	return resp, nil

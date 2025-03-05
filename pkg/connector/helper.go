@@ -597,22 +597,6 @@ func managedIdentityResource(ctx context.Context, sp *client.ServicePrincipal, p
 	return ret, nil
 }
 
-func setManagedIdentityKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join(servicePrincipalSelect, ","))
-	v.Set("$filter", "servicePrincipalType eq 'ManagedIdentity'")
-	v.Set("$top", "999")
-	return v
-}
-
-func setEnterpriseApplicationsKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join(servicePrincipalSelect, ","))
-	v.Set("$filter", "servicePrincipalType eq 'Application' AND accountEnabled eq true")
-	v.Set("$top", "999")
-	return v
-}
-
 func enterpriseApplicationResource(ctx context.Context, app *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := make(map[string]interface{})
 	profile["id"] = app.ID
