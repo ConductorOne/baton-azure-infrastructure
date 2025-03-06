@@ -1,16 +1,29 @@
 ![Baton Logo](./docs/images/baton-logo.png)
 
-# `baton-azure-infrastructure` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-azure-infrastructure.svg)](https://pkg.go.dev/github.com/conductorone/baton-azure-infrastructure) ![main ci](https://github.com/conductorone/baton-azure-infrastructure/actions/workflows/main.yaml/badge.svg)
+#
+`baton-azure-infrastructure` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-azure-infrastructure.svg)](https://pkg.go.dev/github.com/conductorone/baton-azure-infrastructure) ![main ci](https://github.com/conductorone/baton-azure-infrastructure/actions/workflows/main.yaml/badge.svg)
 
 `baton-azure-infrastructure` is a connector for built using the [Baton SDK](https://github.com/conductorone/baton-sdk).
 
 Check out [Baton](https://github.com/conductorone/baton) to learn more the project in general.
 
 # Requirements
-- You need a Microsoft tenant. You get one with an [Azure free trial](https://azure.microsoft.com/pricing/free-trial/). 
-- Once you have a tenant, you need to create an application in Azure AD. You can follow the instructions [here](https://docs.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app).
-- When you create the application, you will get a `client_id` and a `client_secret`. You will need these to authenticate with the Azure API.
-- Then you will need to get the `tenant_id` of your Azure AD tenant. You can find this in the Azure Entra ID Overview page [here](https://portal.azure.com/#blade/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/Overview).
+
+- You need a Microsoft tenant. You get one with an [Azure free trial](https://azure.microsoft.com/pricing/free-trial/).
+- Once you have a tenant, you need to create an application in Azure AD. You can follow the
+  instructions [here](https://docs.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app).
+    - Needs permissions on Microsoft Graph
+        - Application.Read.All
+        - Directory.Read.All
+        - Group.Read.All
+        - Organization.Read.All
+        - ServicePrincipalEndpoint.Read.All
+        - User.Read
+        - User.Read.All
+- When you create the application, you will get a `client_id` and a `client_secret`. You will need these to authenticate
+  with the Azure API.
+- Then you will need to get the `tenant_id` of your Azure AD tenant. You can find this in the Azure Entra ID Overview
+  page [here](https://portal.azure.com/#blade/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/Overview).
 
 Finally, you will need to set the following environment variables:
 
@@ -54,6 +67,7 @@ baton resources
 # Data Model
 
 `baton-azure-infrastructure` will pull down information about the following resources:
+
 - Users (entra users)
 - Groups (entra groups)
 - Roles (azure roles)
@@ -62,11 +76,13 @@ baton resources
 - Managed Identities (entra service principals)
 - Resource Groups (azure resource groups)
 
-We also introduced resource_group_role_assignment(resource group ID, subscription ID and role ID) for provisioning resource Groups.
+We also introduced resource_group_role_assignment(resource group ID, subscription ID and role ID) for provisioning
+resource Groups.
 
 ## resource_group_role_assignment usage:
 
 - Let's use some IDs for this example
+
 ```
 Resource Group `test_resource_group`
 Subscription `39ea64c5-86d5-4c29-8199-5b602c90e1c5`
@@ -75,6 +91,7 @@ Principal `e4e9c5ae-2937-408b-ba3c-0f58cf417f0a`
 ```
 
 - Granting resource group roles for users.
+
 ```
 BATON_AZURE_CLIENT_ID='client_Id' \
 BATON_AZURE_CLIENT_SECRET='client_secret' \
@@ -82,9 +99,11 @@ BATON_AZURE_TENANT_ID='tenant_Id' baton-azure-infrastructure \
 --grant-entitlement 'resource_group_role_assignment:test_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned' --grant-principal-type 'user' --grant-principal 'e4e9c5ae-2937-408b-ba3c-0f58cf417f0a' 
 ```
 
-In the previous example we granted the resource group role `11102f94-c441-49e6-a78b-ef80e0188abc` to user `e4e9c5ae-2937-408b-ba3c-0f58cf417f0a`.
+In the previous example we granted the resource group role `11102f94-c441-49e6-a78b-ef80e0188abc` to user
+`e4e9c5ae-2937-408b-ba3c-0f58cf417f0a`.
 
 - Revoking resource group role grants
+
 ```
 BATON_AZURE_CLIENT_ID='client_Id' \
 BATON_AZURE_CLIENT_SECRET='client_secret' \
