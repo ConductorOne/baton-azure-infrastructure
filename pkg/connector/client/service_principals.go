@@ -24,7 +24,6 @@ var servicePrincipalSelect = []string{
 // ListServicePrincipals represents a list of service principals, nextLink is used to get the next page of results.
 func (a *AzureClient) ListServicePrincipals(ctx context.Context, nextLink string) (*ServicePrincipalsList, error) {
 	nextLink = a.QueryBuilder().
-		// TODO: Validate if is V1 or BETA
 		Version(V1).
 		Add("$select", strings.Join(servicePrincipalSelect, ",")).
 		Add("$filter", "servicePrincipalType eq 'Application' AND accountEnabled eq true").
@@ -102,8 +101,6 @@ func (a *AzureClient) ServicePrincipalGrantAppRoleAssignment(
 	principalID string,
 ) error {
 	url := a.QueryBuilder().
-		// TODO: Should be v1 or beta?
-		// Docs say V1, but old code is on Beta...
 		Version(V1).
 		BuildUrl("servicePrincipals", resourceId, "appRoleAssignedTo")
 
@@ -153,7 +150,6 @@ func (a *AzureClient) ServicePrincipalDeleteAppRoleAssignedTo(ctx context.Contex
 
 func (a *AzureClient) ListServicePrincipalsManagedIdentity(ctx context.Context, nextLink string) (*ServicePrincipalsList, error) {
 	nextLink = a.QueryBuilder().
-		// TODO: Validate if is V1 or BETA
 		Version(V1).
 		Add("$select", strings.Join(servicePrincipalSelect, ",")).
 		Add("$filter", "servicePrincipalType eq 'ManagedIdentity'").

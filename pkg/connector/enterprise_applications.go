@@ -151,7 +151,6 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 	}
 
 	for _, appRole := range servicePrincipal.AppRoles {
-		// TODO: Needs to validate this rule
 		if !slices.Contains(appRole.AllowedMemberTypes, "User") {
 			continue
 		}
@@ -418,7 +417,7 @@ func (o *enterpriseApplicationsBuilder) Grant(ctx context.Context, principal *v2
 
 	resourceID := entitlement.Resource.Id.Resource
 	switch eaEntId.Type {
-	case "owners":
+	case ownersStr:
 		err := o.client.ServicePrincipalAddOwner(ctx, resourceID, principal.Id.Resource)
 		if err != nil {
 			return nil, err

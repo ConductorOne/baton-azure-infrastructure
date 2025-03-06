@@ -28,15 +28,15 @@ type AzureClient struct {
 	token         azcore.TokenCredential
 	httpClient    *uhttp.BaseHttpClient
 	clientFactory *armsubscription.ClientFactory
-	// TODO: add skipAdGroups to the NewMethod
-	skipAdGroups bool
-	graphDomain  string
+	skipAdGroups  bool
+	graphDomain   string
 }
 
 func NewAzureClient(
 	ctx context.Context,
 	httpClient *http.Client,
 	token azcore.TokenCredential,
+	skipAdGroups bool,
 	graphDomain string,
 ) (*AzureClient, error) {
 	client, err := uhttp.NewBaseHttpClientWithContext(ctx, httpClient)
@@ -54,6 +54,7 @@ func NewAzureClient(
 		httpClient:    client,
 		clientFactory: clientFactory,
 		graphDomain:   graphDomain,
+		skipAdGroups:  skipAdGroups,
 	}, nil
 }
 

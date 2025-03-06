@@ -84,7 +84,7 @@ func NewConnectorFromToken(
 		return nil, err
 	}
 
-	azureClient, err := client.NewAzureClient(ctx, httpClient, token, graphDomain)
+	azureClient, err := client.NewAzureClient(ctx, httpClient, token, skipAdGroups, graphDomain)
 	if err != nil {
 		return nil, err
 	}
