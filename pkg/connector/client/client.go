@@ -11,11 +11,14 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
 )
 
-var ValidHosts []string = []string{"graph.microsoft.com", "graph.microsoft.us", "dod-graph.microsoft.us", "graph.microsoft.de", "microsoftgraph.chinacloudapi.cn", "canary.graph.microsoft.com"}
-
-const (
-	apiDomain = "graph.microsoft.com"
-)
+var ValidHosts = []string{
+	"graph.microsoft.com",
+	"graph.microsoft.us",
+	"dod-graph.microsoft.us",
+	"graph.microsoft.de",
+	"microsoftgraph.chinacloudapi.cn",
+	"canary.graph.microsoft.com",
+}
 
 var graphReadScopes = []string{
 	"https://graph.microsoft.com/.default",

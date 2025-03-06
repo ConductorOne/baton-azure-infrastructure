@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"slices"
 	"strings"
+
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
 	"github.com/conductorone/baton-sdk/pkg/field"
 	"github.com/spf13/viper"
@@ -48,7 +49,7 @@ func ValidateConfig(v *viper.Viper) error {
 
 	host := v.GetString(graphDomain.FieldName)
 
-	if slices.Contains(client.ValidHosts, host) == false {
+	if !slices.Contains(client.ValidHosts, host) {
 		return fmt.Errorf(
 			"baton-azure-infrastructure: invalid host: %s should be one of %s",
 			host,
