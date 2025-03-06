@@ -45,7 +45,9 @@ func getConnector(ctx context.Context, v *viper.Viper) (types.ConnectorServer, e
 	azureClientId := v.GetString(azureClientId.FieldName)
 	mailboxSettings := v.GetBool(mailboxSettings.FieldName)
 	skipAdGroups := v.GetBool(skipAdGroups.FieldName)
-	cb, err := connector.New(ctx, useCliCredentials, azureTenantId, azureClientId, azureClientSecret, mailboxSettings, skipAdGroups)
+	graphDomain := v.GetString(graphDomain.FieldName)
+
+	cb, err := connector.New(ctx, useCliCredentials, azureTenantId, azureClientId, azureClientSecret, mailboxSettings, skipAdGroups, graphDomain)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
 		return nil, err

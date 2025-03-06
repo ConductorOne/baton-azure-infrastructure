@@ -26,7 +26,7 @@ var groupFields = []string{
 }
 
 func (a *AzureClient) Groups(ctx context.Context, nextLink string) (*GroupsList, error) {
-	builder := NewAzureQueryBuilder().
+	builder := a.QueryBuilder().
 		// Note: beta version returns more fields than v1.0
 		Version(Beta).
 		Add("$select", strings.Join(groupFields, ",")).
@@ -61,7 +61,7 @@ func (a *AzureClient) GroupOwners(ctx context.Context, groupId string) (*Members
 	// https://learn.microsoft.com/en-us/graph/api/group-list-members?view=graph-rest-1.0&tabs=http
 	//
 	// NOTE #2: This applies to both the members and owners endpoints.
-	reqURL := NewAzureQueryBuilder().
+	reqURL := a.QueryBuilder().
 		Version(Beta).
 		Add("$select", strings.Join([]string{"id"}, ",")).
 		BuildUrl("groups", groupId, "owners")
@@ -87,7 +87,7 @@ func (a *AzureClient) GroupMembers(ctx context.Context, groupId string, nextLink
 	// https://learn.microsoft.com/en-us/graph/api/group-list-members?view=graph-rest-1.0&tabs=http
 	//
 	// NOTE #2: This applies to both the members and owners endpoints.
-	builder := NewAzureQueryBuilder().
+	builder := a.QueryBuilder().
 		Version(Beta).
 		Add("$select", strings.Join([]string{
 			"id",
@@ -114,7 +114,7 @@ func (a *AzureClient) GroupMembers(ctx context.Context, groupId string, nextLink
 }
 
 func (a *AzureClient) GroupAddOwner(ctx context.Context, groupId string, refUrl string) error {
-	reqURL := NewAzureQueryBuilder().
+	reqURL := a.QueryBuilder().
 		Version(V1).
 		BuildUrl("groups", groupId, "owners", "$ref")
 
@@ -129,7 +129,7 @@ func (a *AzureClient) GroupAddOwner(ctx context.Context, groupId string, refUrl 
 }
 
 func (a *AzureClient) GroupRemoveOwner(ctx context.Context, groupId string, userId string) error {
-	reqURL := NewAzureQueryBuilder().
+	reqURL := a.QueryBuilder().
 		Version(V1).
 		BuildUrl("groups", groupId, "owners", userId, "$ref")
 
@@ -142,7 +142,7 @@ func (a *AzureClient) GroupRemoveOwner(ctx context.Context, groupId string, user
 }
 
 func (a *AzureClient) GroupAddMember(ctx context.Context, groupId string, refUrl string) error {
-	reqURL := NewAzureQueryBuilder().
+	reqURL := a.QueryBuilder().
 		Version(V1).
 		BuildUrl("groups", groupId, "members", "$ref")
 
@@ -157,7 +157,7 @@ func (a *AzureClient) GroupAddMember(ctx context.Context, groupId string, refUrl
 }
 
 func (a *AzureClient) GroupRemoveMember(ctx context.Context, groupId string, userId string) error {
-	reqURL := NewAzureQueryBuilder().
+	reqURL := a.QueryBuilder().
 		Version(V1).
 		BuildUrl("groups", groupId, "members", userId, "$ref")
 

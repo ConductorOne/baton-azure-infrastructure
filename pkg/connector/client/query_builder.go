@@ -15,12 +15,14 @@ const (
 type AzureQueryBuilder struct {
 	params     map[string][]string
 	apiVersion AzureApiVersion
+	host       string
 }
 
-func NewAzureQueryBuilder() *AzureQueryBuilder {
+func NewAzureQueryBuilder(host string) *AzureQueryBuilder {
 	return &AzureQueryBuilder{
 		params:     map[string][]string{},
 		apiVersion: V1,
+		host:       host,
 	}
 }
 
@@ -50,7 +52,7 @@ func (q *AzureQueryBuilder) BuildUrl(reqPaths ...string) string {
 
 	ux := url.URL{
 		Scheme:   "https",
-		Host:     apiDomain,
+		Host:     q.host,
 		Path:     path.Join(urls...),
 		RawQuery: values.Encode(),
 	}
@@ -69,7 +71,7 @@ func (q *AzureQueryBuilder) BuildUrlWithPagination(reqPath string, nextLink stri
 
 	ux := url.URL{
 		Scheme:   "https",
-		Host:     apiDomain,
+		Host:     q.host,
 		Path:     path.Join(string(q.apiVersion), reqPath),
 		RawQuery: values.Encode(),
 	}

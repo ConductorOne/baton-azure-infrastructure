@@ -11,6 +11,8 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
 )
 
+var ValidHosts []string = []string{"graph.microsoft.com", "graph.microsoft.us", "dod-graph.microsoft.us", "graph.microsoft.de", "microsoftgraph.chinacloudapi.cn", "canary.graph.microsoft.com"}
+
 const (
 	apiDomain = "graph.microsoft.com"
 )
@@ -25,12 +27,14 @@ type AzureClient struct {
 	clientFactory *armsubscription.ClientFactory
 	// TODO: add skipAdGroups to the NewMethod
 	skipAdGroups bool
+	graphDomain  string
 }
 
 func NewAzureClient(
 	ctx context.Context,
 	httpClient *http.Client,
 	token azcore.TokenCredential,
+	graphDomain string,
 ) (*AzureClient, error) {
 	client, err := uhttp.NewBaseHttpClientWithContext(ctx, httpClient)
 	if err != nil {
@@ -46,6 +50,7 @@ func NewAzureClient(
 		token:         token,
 		httpClient:    client,
 		clientFactory: clientFactory,
+		graphDomain:   graphDomain,
 	}, nil
 }
 
@@ -129,4 +134,8 @@ func (a *AzureClient) FromPath(
 	}
 
 	return nil
+}
+
+func (a *AzureClient) QueryBuilder() *AzureQueryBuilder {
+	return NewAzureQueryBuilder(a.graphDomain)
 }
