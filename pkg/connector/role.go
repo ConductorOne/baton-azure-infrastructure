@@ -50,7 +50,6 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 
 		// Iterate over role definitions
 		for _, role := range resp.Value {
-
 			if r.conn.SkipUnusedRoles {
 				if role.ID == nil {
 					continue
@@ -60,7 +59,6 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 				if err != nil {
 					return nil, "", nil, err
 				}
-				// /subscriptions/39ea64c5-86d5-4c29-8199-5b602c90e1c5/providers/Microsoft.Authorization/roleDefinitions/8311e382-0749-4cb8-b61a-304f252e45ec
 				// omit ok since we know the key exists
 				assignments, _ := r.cache.Get(subscriptionID)
 				_, ok := assignments[*role.ID]
