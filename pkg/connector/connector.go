@@ -66,11 +66,13 @@ func (d *Connector) Validate(ctx context.Context) (annotations.Annotations, erro
 	return nil, nil
 }
 
-func NewConnectorFromToken(ctx context.Context,
+func NewConnectorFromToken(
+	ctx context.Context,
 	httpClient *http.Client,
 	token azcore.TokenCredential,
 	mailboxSettings bool,
 	skipAdGroups bool,
+	graphDomain string,
 ) (*Connector, error) {
 	baseClient, err := uhttp.NewBaseHttpClientWithContext(ctx, httpClient)
 	if err != nil {
@@ -82,7 +84,7 @@ func NewConnectorFromToken(ctx context.Context,
 		return nil, err
 	}
 
-	azureClient, err := client.NewAzureClient(ctx, httpClient, token)
+	azureClient, err := client.NewAzureClient(ctx, httpClient, token, graphDomain)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +126,7 @@ func (d *Connector) getRoleDefinitionsClient() (*armauthorization.RoleDefinition
 }
 
 // New returns a new instance of the connector.
-func New(ctx context.Context, useCliCredentials bool, tenantID, clientID, clientSecret string, mailboxSettings bool, skipAdGroups bool) (*Connector, error) {
+func New(ctx context.Context, useCliCredentials bool, tenantID, clientID, clientSecret string, mailboxSettings bool, skipAdGroups bool, graphDomain string) (*Connector, error) {
 	var cred azcore.TokenCredential
 	httpClient, err := uhttp.NewClient(
 		ctx,
@@ -160,10 +162,12 @@ func New(ctx context.Context, useCliCredentials bool, tenantID, clientID, client
 		return nil, err
 	}
 
-	return NewConnectorFromToken(ctx,
+	return NewConnectorFromToken(
+		ctx,
 		httpClient,
 		cred,
 		mailboxSettings,
 		skipAdGroups,
+		graphDomain,
 	)
 }

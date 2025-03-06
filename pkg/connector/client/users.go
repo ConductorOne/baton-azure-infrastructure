@@ -25,7 +25,7 @@ var userFields = []string{
 // Calls https://graph.microsoft.com/beta/users
 func (a *AzureClient) Users(ctx context.Context, nextLink string) (*UsersList, error) {
 	resp := &UsersList{}
-	reqURL := NewAzureQueryBuilder().
+	reqURL := a.QueryBuilder().
 		// Note: beta version returns more fields than v1.0
 		Version(Beta).
 		Add("$select", strings.Join(userFields, ",")).
@@ -45,7 +45,7 @@ func (a *AzureClient) Users(ctx context.Context, nextLink string) (*UsersList, e
 // Calls https://graph.microsoft.com/beta/users/{userId}/mailboxSettings
 func (a *AzureClient) UserMailboxSetting(ctx context.Context, userId string) (*MailboxSettings, error) {
 	resp := &MailboxSettings{}
-	reqURL := NewAzureQueryBuilder().
+	reqURL := a.QueryBuilder().
 		// Note: beta version returns more fields than v1.0
 		Version(Beta).
 		Add("$select", strings.Join([]string{"userPurpose"}, ",")).

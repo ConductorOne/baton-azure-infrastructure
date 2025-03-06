@@ -468,7 +468,7 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 	)
 
 	for _, endpoint := range mapEndPoint {
-		builderUrl := client.NewAzureQueryBuilder().
+		builderUrl := cn.client.QueryBuilder().
 			Version(client.V1).
 			BuildUrl(endpoint, principalID)
 

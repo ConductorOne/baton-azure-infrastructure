@@ -9,12 +9,12 @@ import (
 // ServicePrincipalAddOwner adds an owner to a service principal
 // https://learn.microsoft.com/en-us/graph/api/serviceprincipal-post-owners?view=graph-rest-1.0&tabs=http
 func (a *AzureClient) ServicePrincipalAddOwner(ctx context.Context, servicePrincipalId string, objectId string) error {
-	url := NewAzureQueryBuilder().
+	url := a.QueryBuilder().
 		Version(V1).
 		BuildUrl("servicePrincipals", servicePrincipalId, "owners", "$ref")
 
 	body := &Assignment{
-		ObjectRef: NewAzureQueryBuilder().
+		ObjectRef: a.QueryBuilder().
 			Version(V1).
 			BuildUrl("directoryObjects", objectId),
 	}

@@ -23,7 +23,7 @@ var servicePrincipalSelect = []string{
 
 // ListServicePrincipals represents a list of service principals, nextLink is used to get the next page of results.
 func (a *AzureClient) ListServicePrincipals(ctx context.Context, nextLink string) (*ServicePrincipalsList, error) {
-	nextLink = NewAzureQueryBuilder().
+	nextLink = a.QueryBuilder().
 		// TODO: Validate if is V1 or BETA
 		Version(V1).
 		Add("$select", strings.Join(servicePrincipalSelect, ",")).
@@ -43,7 +43,7 @@ func (a *AzureClient) ListServicePrincipals(ctx context.Context, nextLink string
 }
 
 func (a *AzureClient) ServicePrincipal(ctx context.Context, id string) (*ServicePrincipal, error) {
-	url := NewAzureQueryBuilder().
+	url := a.QueryBuilder().
 		Version(Beta).
 		Add("$expand", "appRoleAssignedTo").
 		BuildUrl("servicePrincipals", id)
@@ -70,7 +70,7 @@ func (a *AzureClient) ServicePrincipalOwners(ctx context.Context, id string) (*M
 	// https://learn.microsoft.com/en-us/graph/api/group-list-members?view=graph-rest-1.0&tabs=http
 	//
 	// NOTE #2: This applies to both the members and owners endpoints.
-	builder := NewAzureQueryBuilder().
+	builder := a.QueryBuilder().
 		Version(Beta).
 		Add("$select", strings.Join([]string{"id"}, ","))
 
@@ -101,7 +101,7 @@ func (a *AzureClient) ServicePrincipalGrantAppRoleAssignment(
 	appRoleId string,
 	principalID string,
 ) error {
-	url := NewAzureQueryBuilder().
+	url := a.QueryBuilder().
 		// TODO: Should be v1 or beta?
 		// Docs say V1, but old code is on Beta...
 		Version(V1).
@@ -124,7 +124,7 @@ func (a *AzureClient) ServicePrincipalGrantAppRoleAssignment(
 // ServicePrincipalDeleteOwner removes an owner from a service principal
 // https://learn.microsoft.com/en-us/graph/api/serviceprincipal-delete-owners?view=graph-rest-1.0&tabs=http
 func (a *AzureClient) ServicePrincipalDeleteOwner(ctx context.Context, principalId, ownerID string) error {
-	url := NewAzureQueryBuilder().
+	url := a.QueryBuilder().
 		Version(V1).
 		BuildUrl("servicePrincipals", principalId, "owners", ownerID, "$ref")
 
@@ -139,7 +139,7 @@ func (a *AzureClient) ServicePrincipalDeleteOwner(ctx context.Context, principal
 // ServicePrincipalDeleteAppRoleAssignedTo Deletes an appRoleAssignment that a user, group, or client service principal has been granted for a resource service principal.
 // https://learn.microsoft.com/en-us/graph/api/serviceprincipal-delete-approleassignedto?view=graph-rest-1.0&tabs=http
 func (a *AzureClient) ServicePrincipalDeleteAppRoleAssignedTo(ctx context.Context, principalId, appRoleAssignmentId string) error {
-	url := NewAzureQueryBuilder().
+	url := a.QueryBuilder().
 		Version(V1).
 		BuildUrl("servicePrincipals", principalId, "appRoleAssignedTo", appRoleAssignmentId)
 
@@ -152,7 +152,7 @@ func (a *AzureClient) ServicePrincipalDeleteAppRoleAssignedTo(ctx context.Contex
 }
 
 func (a *AzureClient) ListServicePrincipalsManagedIdentity(ctx context.Context, nextLink string) (*ServicePrincipalsList, error) {
-	nextLink = NewAzureQueryBuilder().
+	nextLink = a.QueryBuilder().
 		// TODO: Validate if is V1 or BETA
 		Version(V1).
 		Add("$select", strings.Join(servicePrincipalSelect, ",")).
