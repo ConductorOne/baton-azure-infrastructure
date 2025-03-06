@@ -677,10 +677,7 @@ func getAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID
 		}
 
 		for _, assignment := range page.Value {
-			roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
-				subscriptionID,
-				roleId,
-			)
+			roleDefinitionID := subscriptionRoleId(subscriptionID, roleId)
 			if *assignment.Properties.PrincipalID == principalID &&
 				*assignment.Properties.RoleDefinitionID == roleDefinitionID {
 				return *assignment.Name, nil
@@ -689,4 +686,12 @@ func getAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID
 	}
 
 	return "", fmt.Errorf("role assignment not found")
+}
+
+func subscriptionRoleId(subscriptionID, roleID string) string {
+	return fmt.Sprintf(
+		"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
+		subscriptionID,
+		roleID,
+	)
 }

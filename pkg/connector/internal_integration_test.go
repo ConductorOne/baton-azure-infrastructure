@@ -99,6 +99,7 @@ func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecre
 		false,
 		false,
 		"graph.microsoft.com",
+		false,
 	)
 
 	if err != nil {
@@ -167,6 +168,8 @@ func TestRoleBuilderList(t *testing.T) {
 	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
 	require.NoError(t, err)
 
+	connTest.SkipUnusedRoles = true
+
 	r := newRoleBuilder(connTest)
 	_, _, _, err = r.List(ctxTest, nil, &pagination.Token{})
 	require.NoError(t, err)
@@ -186,11 +189,7 @@ func TestRoleGrants(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, rl := range lstRoles {
-		roleDefinitionID := fmt.Sprintf(
-			"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
-			subscriptionIDForTesting,
-			rl,
-		)
+		roleDefinitionID := subscriptionRoleId(subscriptionIDForTesting, rl)
 		resource, err := roleResource(ctxTest, &armauthorization.RoleDefinition{
 			ID: &roleDefinitionID,
 			Properties: &armauthorization.RoleDefinitionProperties{
@@ -284,7 +283,7 @@ func parseRoleAssignmentEntitlementID(id string) (*v2.ResourceId, []string, erro
 }
 
 func getRoleForTesting(ctxTest context.Context, subscriptionId, roleId, name, description string) (*v2.Resource, error) {
-	strRoleId := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
+	strRoleId := subscriptionRoleId(subscriptionId, roleId)
 	return roleResource(ctxTest, &armauthorization.RoleDefinition{
 		ID:   &strRoleId,
 		Name: &name,
@@ -296,7 +295,7 @@ func getRoleForTesting(ctxTest context.Context, subscriptionId, roleId, name, de
 }
 
 func getRoleAssignmentResourceGroupForTesting(ctxTest context.Context, subscriptionId, roleId, resourceGroupName, description string) (*v2.Resource, error) {
-	strRoleId := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
+	strRoleId := subscriptionRoleId(subscriptionId, roleId)
 	return roleAssignmentResourceGroupResource(ctxTest,
 		subscriptionId,
 		roleId,

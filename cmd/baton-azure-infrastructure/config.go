@@ -12,13 +12,40 @@ import (
 )
 
 var (
-	useCliCredentials = field.BoolField("use-cli-credentials", field.WithDescription("If true, uses the az cli to auth"))
-	azureClientSecret = field.StringField("azure-client-secret", field.WithDescription("Azure Client Secret"))
-	azureTenantId     = field.StringField("azure-tenant-id", field.WithDescription("Azure Tenant ID"))
-	azureClientId     = field.StringField("azure-client-id", field.WithDescription("Azure Client ID"))
-	mailboxSettings   = field.BoolField("mailboxSettings", field.WithDescription("If true, attempt to get mailbox settings for users to determine user purpose"))
-	skipAdGroups      = field.BoolField("skip-ad-groups", field.WithDescription("If true, skip syncing Windows Server Active Directory groups"))
-	graphDomain       = field.StringField("graph-domain", field.WithDescription("Domain for Microsoft Graph API"), field.WithDefaultValue("graph.microsoft.com"))
+	useCliCredentials = field.BoolField(
+		"use-cli-credentials",
+		field.WithDescription("If true, uses the az cli to auth"),
+	)
+	azureClientSecret = field.StringField(
+		"azure-client-secret",
+		field.WithDescription("Azure Client Secret"),
+	)
+	azureTenantId = field.StringField(
+		"azure-tenant-id",
+		field.WithDescription("Azure Tenant ID"),
+	)
+	azureClientId = field.StringField(
+		"azure-client-id",
+		field.WithDescription("Azure Client ID"),
+	)
+	mailboxSettings = field.BoolField(
+		"mailboxSettings",
+		field.WithDescription("If true, attempt to get mailbox settings for users to determine user purpose"),
+	)
+	skipAdGroups = field.BoolField(
+		"skip-ad-groups",
+		field.WithDescription("If true, skip syncing Windows Server Active Directory groups"),
+	)
+	graphDomain = field.StringField(
+		"graph-domain",
+		field.WithDescription("Domain for Microsoft Graph API"),
+		field.WithDefaultValue("graph.microsoft.com"),
+	)
+	skipUnusedRoles = field.BoolField(
+		"skip-unused-roles",
+		field.WithDescription("Skip unused roles"),
+		field.WithDefaultValue(false),
+	)
 )
 
 var ConfigurationFields = []field.SchemaField{
@@ -29,6 +56,7 @@ var ConfigurationFields = []field.SchemaField{
 	mailboxSettings,
 	skipAdGroups,
 	graphDomain,
+	skipUnusedRoles,
 }
 
 var FieldRelationships = []field.SchemaFieldRelationship{

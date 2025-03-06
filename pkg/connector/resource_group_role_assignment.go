@@ -140,10 +140,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resour
 		}
 
 		for _, roleAssignment := range page.Value {
-			roleDefinitionID := fmt.Sprintf(
-				"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
-				subscriptionID,
-				roleID)
+			roleDefinitionID := subscriptionRoleId(subscriptionID, roleID)
 			if roleDefinitionID != *roleAssignment.Properties.RoleDefinitionID {
 				continue
 			}
@@ -197,7 +194,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grant(ctx context.Context, princip
 	// Define your resource scope
 	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionId, resourceGroupId)
 	// Define the details of the role assignment
-	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
+	roleDefinitionID := subscriptionRoleId(subscriptionId, roleId)
 	// Create a role assignment name (must be unique)
 	roleAssignmentId := uuid.New().String()
 	// Prepare role assignment parameters

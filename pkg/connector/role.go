@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -22,7 +23,9 @@ import (
 type roleBuilder struct {
 	conn                  *Connector
 	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
-	cache                 *GenericCache[[]*armauthorization.RoleAssignment]
+	// cache for role assignments
+	// subscriptionID -> RoleDefinitionID -> RoleAssignment
+	cache *GenericCache[map[string]*armauthorization.RoleAssignment]
 }
 
 func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -47,6 +50,26 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 
 		// Iterate over role definitions
 		for _, role := range resp.Value {
+
+			if r.conn.SkipUnusedRoles {
+				if role.ID == nil {
+					continue
+				}
+
+				err := r.cacheRoleAssignments(ctx, subscriptionID)
+				if err != nil {
+					return nil, "", nil, err
+				}
+				// /subscriptions/39ea64c5-86d5-4c29-8199-5b602c90e1c5/providers/Microsoft.Authorization/roleDefinitions/8311e382-0749-4cb8-b61a-304f252e45ec
+				// omit ok since we know the key exists
+				assignments, _ := r.cache.Get(subscriptionID)
+				_, ok := assignments[*role.ID]
+				if !ok {
+					// not in use, should be skipped
+					continue
+				}
+			}
+
 			rs, err := roleResource(ctx, role, &v2.ResourceId{
 				ResourceType: subscriptionsResourceType.Id,
 				Resource:     StringValue(&subscriptionID),
@@ -101,10 +124,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 
 	assignments, _ := r.cache.Get(subscriptionID)
 	for _, assignment := range assignments {
-		roleDefinitionID := fmt.Sprintf(
-			"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
-			subscriptionID,
-			roleID)
+		roleDefinitionID := subscriptionRoleId(subscriptionID, roleID)
 		if roleDefinitionID != *assignment.Properties.RoleDefinitionID {
 			continue
 		}
@@ -156,7 +176,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	// Define your scope
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionId)
 	// Define the details of the role assignment
-	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
+	roleDefinitionID := subscriptionRoleId(subscriptionId, roleId)
 	// Create a role assignment name (must be unique)
 	roleAssignmentId := uuid.New().String()
 	// Prepare role assignment parameters
@@ -268,14 +288,23 @@ func newRoleBuilder(c *Connector) *roleBuilder {
 	return &roleBuilder{
 		conn:                  c,
 		roleDefinitionsClient: c.roleDefinitionsClient,
-		cache:                 NewGenericCache[[]*armauthorization.RoleAssignment](),
+		cache:                 NewGenericCache[map[string]*armauthorization.RoleAssignment](),
 	}
 }
 
 func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID string) error {
+	l := ctxzap.Extract(ctx)
+
 	if _, ok := r.cache.Get(subscriptionID); ok {
 		return nil
 	}
+
+	l.Info(
+		"baton-azure-infrastructure: caching role assignments",
+		zap.String("subscription_id", subscriptionID),
+	)
+
+	start := time.Now()
 
 	// Create a Role Assignments Client
 	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.conn.token, nil)
@@ -291,9 +320,27 @@ func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID s
 			return err
 		}
 
-		assignments, _ := r.cache.Get(subscriptionID)
-		r.cache.Set(subscriptionID, append(assignments, page.Value...))
+		assignments, _ := r.cache.GetOrSet(subscriptionID, func() (map[string]*armauthorization.RoleAssignment, error) {
+			return make(map[string]*armauthorization.RoleAssignment), nil
+		})
+
+		for _, assignment := range page.Value {
+			if assignment.Properties == nil && assignment.Properties.RoleDefinitionID != nil {
+				l.Warn("baton-azure-infrastructure: role assignment properties are nil")
+				continue
+			}
+
+			assignments[*assignment.Properties.RoleDefinitionID] = assignment
+		}
+
+		r.cache.Set(subscriptionID, assignments)
 	}
+
+	l.Info(
+		"baton-azure-infrastructure: role assignments cached successfully",
+		zap.String("subscription_id", subscriptionID),
+		zap.Duration("duration", time.Since(start)),
+	)
 
 	return nil
 }
