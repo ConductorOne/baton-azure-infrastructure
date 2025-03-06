@@ -51,7 +51,7 @@ func TestEnterpriseCalls(t *testing.T) {
 	require.NotNil(t, principals)
 
 	for _, principal := range principals.Value {
-		if principal.AppRolesAssignedTo != nil && len(principal.AppRolesAssignedTo) != 0 {
+		if len(principal.AppRolesAssignedTo) != 0 {
 			for _, roleAssignment := range principal.AppRolesAssignedTo {
 				if roleAssignment.AppRoleId == "00000000-0000-0000-0000-000000000000" {
 					t.Log("RoleAssignment: ", roleAssignment)

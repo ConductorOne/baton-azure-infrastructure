@@ -1,11 +1,8 @@
 package connector
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/mail"
 	"net/url"
 	"path"
@@ -24,6 +21,15 @@ import (
 	expSlices "golang.org/x/exp/slices"
 )
 
+// https://learn.microsoft.com/en-us/graph/api/resources/approleassignment?view=graph-rest-1.0
+//
+//	 	The identifier (id) for the app role which is assigned to the principal. This app role must be
+//			exposed in the appRoles property on the resource application's service principal (resourceId).
+//			If the resource application has not declared any app roles, a default app role ID of
+//			00000000-0000-0000-0000-000000000000 can be specified to signal that the principal is assigned
+//			to the resource app without any specific app roles. Required on create
+var defaultAppRoleAssignmentID string = "00000000-0000-0000-0000-000000000000"
+
 const (
 	managerIDProfileKey          = "managerId"
 	managerEmailProfileKey       = "managerEmail"
@@ -31,10 +37,6 @@ const (
 	supervisorEmailProfileKey    = "supervisorEmail"
 	supervisorFullNameProfileKey = "supervisor"
 )
-
-var graphReadScopes = []string{
-	"https://graph.microsoft.com/.default",
-}
 
 // Create a new connector resource for an Entra User.
 func userResource(ctx context.Context, u *client.User, parentResourceID *v2.ResourceId, userTraitOptions ...rs.UserTraitOption) (*v2.Resource, error) {
@@ -219,39 +221,6 @@ func membershipTypeValue(g *client.Group) string {
 	return "assigned"
 }
 
-func setGroupKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join([]string{
-		"classification",
-		"description",
-		"displayName",
-		"groupTypes",
-		"id",
-		"mail",
-		"mailEnabled",
-		"onPremisesSecurityIdentifier",
-		"onPremisesSyncEnabled",
-		"securityEnabled",
-		"securityIdentifier",
-		"isAssignableToRole",
-		"isManagementRestricted",
-		"createdDateTime",
-	}, ","))
-	v.Set("$top", "999")
-	return v
-}
-
-func setMemberQuery() url.Values {
-	memberQuery := url.Values{}
-	memberQuery.Set("$select", strings.Join([]string{
-		"id",
-		"servicePrincipalType",
-		"onPremisesSyncEnabled",
-	}, ","))
-	memberQuery.Set("$top", "999")
-	return memberQuery
-}
-
 func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, permission string) string {
 	return fmt.Sprintf(
 		"%s-grant:%s:%s:%s:%s",
@@ -263,7 +232,7 @@ func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, per
 	)
 }
 
-func getGroupGrants(ctx context.Context, resp *client.MembershipList, resource *v2.Resource, g *groupBuilder, ps *pagination.PageState) ([]*v2.Grant, error) {
+func getGroupGrants(ctx context.Context, resp *client.MembershipList, resource *v2.Resource, ps *pagination.PageState) ([]*v2.Grant, error) {
 	grants, err := ConvertErr(resp.Members, func(gm *client.Membership) (*v2.Grant, error) {
 		var annos annotations.Annotations
 		objectID := resource.Id.GetResource()
@@ -306,14 +275,6 @@ func getGroupGrants(ctx context.Context, resp *client.MembershipList, resource *
 	})
 
 	return grants, err
-}
-
-func (a *assignment) MarshalToReader() (*bytes.Reader, error) {
-	data, err := json.Marshal(a)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(data), nil
 }
 
 func getGroupGrantURL(principal *v2.Resource) string {
@@ -375,7 +336,7 @@ func tenantResource(ctx context.Context, t *armsubscription.TenantIDDescription)
 }
 
 func getResourceGroupID(name, subscriptionID, roleID string) string {
-	return (name + ":" + subscriptionID + ":" + roleID)
+	return name + ":" + subscriptionID + ":" + roleID
 }
 
 // https://learn.microsoft.com/es-es/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
@@ -504,12 +465,14 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 	var (
 		principalData map[string]interface{}
 		mapEndPoint   = []string{"directoryObjects", "users", "groups", "servicePrincipals"}
-		index         = 0
 	)
-	for index < len(mapEndPoint) {
-		reqURL := cn.buildURL(fmt.Sprintf("%s/%s", mapEndPoint[index], principalID), nil)
-		resp := &principalData
-		err := cn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
+
+	for _, endpoint := range mapEndPoint {
+		builderUrl := client.NewAzureQueryBuilder().
+			Version(client.V1).
+			BuildUrl(endpoint, principalID)
+
+		err := cn.client.FromPath(ctx, builderUrl, &principalData)
 		if err != nil {
 			return "", err
 		}
@@ -525,8 +488,6 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 				return principalType, nil
 			}
 		}
-
-		index++
 	}
 
 	return "", nil
@@ -679,12 +640,12 @@ func getResourceGroups(ctx context.Context, conn *Connector) ([]string, error) {
 		}
 
 		for _, subscription := range page.Value {
-			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, conn.token, nil)
+			resourceGroupsClient, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, conn.token, nil)
 			if err != nil {
 				return nil, err
 			}
 
-			for pager := client.NewListPager(nil); pager.More(); {
+			for pager := resourceGroupsClient.NewListPager(nil); pager.More(); {
 				page, err := pager.NextPage(ctx)
 				if err != nil {
 					return nil, err

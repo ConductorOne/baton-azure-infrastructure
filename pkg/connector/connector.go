@@ -2,20 +2,21 @@ package connector
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 
+	"github.com/sourcegraph/conc/iter"
+
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
-	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
-	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
-	uhttp "github.com/conductorone/baton-sdk/pkg/uhttp"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 )
 
@@ -86,6 +87,15 @@ func NewConnectorFromToken(ctx context.Context,
 		return nil, err
 	}
 
+	organizations, err := azureClient.GetOrganizations(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	organizationIDs := iter.Map(organizations, func(t *client.Organization) string {
+		return t.ID
+	})
+
 	c := &Connector{
 		token:           token,
 		httpClient:      baseClient,
@@ -93,13 +103,8 @@ func NewConnectorFromToken(ctx context.Context,
 		SkipAdGroups:    skipAdGroups,
 		clientFactory:   clientFactory,
 		client:          azureClient,
+		organizationIDs: organizationIDs,
 	}
-
-	organizationIDs, err := c.getOrganizationIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	c.organizationIDs = organizationIDs
 
 	roleDefinitionsClient, err := c.getRoleDefinitionsClient()
 	if err != nil {
@@ -111,27 +116,11 @@ func NewConnectorFromToken(ctx context.Context,
 }
 
 func (d *Connector) getRoleDefinitionsClient() (*armauthorization.RoleDefinitionsClient, error) {
-	client, err := armauthorization.NewRoleDefinitionsClient(d.token, nil)
+	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(d.token, nil)
 	if err != nil {
 		return nil, err
 	}
-	return client, nil
-}
-
-func (d *Connector) getOrganizationIDs(ctx context.Context) ([]string, error) {
-	resp := &Organizations{}
-	reqURL := d.buildBetaURL("organization", nil)
-	err := d.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
-	if err != nil {
-		return nil, fmt.Errorf("baton-microsoft-entra: failed to get organization ID: %w", err)
-	}
-
-	organizationIDs := []string{}
-	for _, org := range resp.Value {
-		organizationIDs = append(organizationIDs, org.ID)
-	}
-
-	return organizationIDs, nil
+	return roleDefinitionsClient, nil
 }
 
 // New returns a new instance of the connector.

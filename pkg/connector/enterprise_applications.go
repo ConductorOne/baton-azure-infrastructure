@@ -7,6 +7,9 @@ import (
 	"slices"
 	"strings"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
@@ -270,9 +273,9 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	case ownersStr:
 		resp, err := e.client.ServicePrincipalOwners(ctx, principalId)
 		if err != nil {
-			if errors.Is(err, ErrNotFound) {
+			if status.Code(err) == codes.NotFound {
 				ctxzap.Extract(ctx).Warn(
-					"app role owner membership not found (underlying 404)",
+					"app role owner membership not found",
 					zap.String("app_role_assignment_id", resource.Id.GetResource()),
 					zap.String("url", ps.Token),
 					zap.Error(err),
