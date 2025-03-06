@@ -112,3 +112,59 @@ func (a *AzureClient) GroupMembers(ctx context.Context, groupId string, nextLink
 
 	return resp, nil
 }
+
+func (a *AzureClient) GroupAddOwner(ctx context.Context, groupId string, refUrl string) error {
+	reqURL := NewAzureQueryBuilder().
+		Version(V1).
+		BuildUrl("groups", groupId, "owners", "$ref")
+
+	body := &Assignment{ObjectRef: refUrl}
+
+	err := a.requestWithToken(ctx, graphReadScopes, http.MethodPost, reqURL, body, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *AzureClient) GroupRemoveOwner(ctx context.Context, groupId string, userId string) error {
+	reqURL := NewAzureQueryBuilder().
+		Version(V1).
+		BuildUrl("groups", groupId, "owners", userId, "$ref")
+
+	err := a.requestWithToken(ctx, graphReadScopes, http.MethodDelete, reqURL, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *AzureClient) GroupAddMember(ctx context.Context, groupId string, refUrl string) error {
+	reqURL := NewAzureQueryBuilder().
+		Version(V1).
+		BuildUrl("groups", groupId, "members", "$ref")
+
+	body := &Assignment{ObjectRef: refUrl}
+
+	err := a.requestWithToken(ctx, graphReadScopes, http.MethodPost, reqURL, body, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *AzureClient) GroupRemoveMember(ctx context.Context, groupId string, userId string) error {
+	reqURL := NewAzureQueryBuilder().
+		Version(V1).
+		BuildUrl("groups", groupId, "members", userId, "$ref")
+
+	err := a.requestWithToken(ctx, graphReadScopes, http.MethodDelete, reqURL, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}

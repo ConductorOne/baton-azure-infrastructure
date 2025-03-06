@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"net/http"
-	"net/url"
-	"path"
-	"strings"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -21,7 +19,6 @@ import (
 )
 
 type groupBuilder struct {
-	conn   *Connector
 	client *client.AzureClient
 }
 
@@ -101,12 +98,10 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 	if b.Current() == nil {
 		b.Push(pagination.PageState{
 			ResourceTypeID: typeOwners,
-			Token:          "",
 		})
 
 		b.Push(pagination.PageState{
 			ResourceTypeID: typeMembers,
-			Token:          "",
 		})
 	}
 
@@ -149,7 +144,7 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 		})
 	}
 
-	grants, err := getGroupGrants(ctx, memberShip, resource, g, ps)
+	grants, err := getGroupGrants(ctx, memberShip, resource, ps)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -174,29 +169,19 @@ func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitl
 		return nil, errors.New("baton-azure-infrastructure: only users can be granted group entitlements")
 	}
 
-	var reqURL string
+	var err error
 	groupID := entitlement.Resource.Id.Resource
+	objRef := getGroupGrantURL(principal)
+
 	switch {
 	case strings.HasSuffix(entitlement.Id, ":owners"):
-		// https://learn.microsoft.com/en-us/graph/api/group-post-owners?view=graph-rest-1.0&tabs=http
-		reqURL = g.conn.buildURL(path.Join("groups", groupID, "owners", "$ref"), url.Values{})
+		err = g.client.GroupAddOwner(ctx, groupID, objRef)
 	case strings.HasSuffix(entitlement.Id, ":members"):
-		// https://learn.microsoft.com/en-us/graph/api/group-post-members?view=graph-rest-1.0&tabs=http
-		reqURL = g.conn.buildURL(path.Join("groups", groupID, "members", "$ref"), url.Values{})
+		err = g.client.GroupAddMember(ctx, groupID, objRef)
 	default:
 		return nil, errors.New("baton-azure-infrastructure: only members can provision membership or owners entitlements to a group")
 	}
 
-	objRef := getGroupGrantURL(principal)
-	assign := &assignment{
-		ObjectRef: objRef,
-	}
-	body, err := assign.MarshalToReader()
-	if err != nil {
-		return nil, err
-	}
-
-	err = g.conn.query(ctx, graphReadScopes, http.MethodPost, reqURL, body, nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "added object references already exist") {
 			l.Info("Attempted to grant a group membership that already exists, treating as successful")
@@ -222,23 +207,19 @@ func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 		return nil, errors.New("baton-azure-infrastructure: only users can be granted group entitlements")
 	}
 
-	var reqURL string
+	var err error
 	groupID := entitlement.Resource.Id.Resource
 	userID := principal.Id.Resource
 	switch {
 	case strings.HasSuffix(entitlement.Id, ":owners"):
-		// https://learn.microsoft.com/en-us/graph/api/group-post-owners?view=graph-rest-1.0&tabs=http
-		reqURL = g.conn.buildURL(path.Join("groups", groupID, "owners", userID, "$ref"), url.Values{})
+		err = g.client.GroupRemoveOwner(ctx, groupID, userID)
 	case strings.HasSuffix(entitlement.Id, ":members"):
-		// https://learn.microsoft.com/en-us/graph/api/group-delete-members?view=graph-rest-1.0&tabs=http
-		reqURL = g.conn.buildURL(path.Join("groups", groupID, "members", userID, "$ref"), url.Values{})
+		err = g.client.GroupRemoveMember(ctx, groupID, userID)
 	default:
 		return nil, errors.New("baton-azure-infrastructure: only can revoke membership or owners entitlements to a group")
 	}
-
-	err := g.conn.query(ctx, graphReadScopes, http.MethodDelete, reqURL, nil, nil)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if status.Code(err) == codes.NotFound {
 			l.Info("Group membership to revoke not found; treating as successful because the end state is achieved")
 			return nil, nil
 		}
@@ -251,7 +232,6 @@ func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 
 func newGroupBuilder(c *Connector) *groupBuilder {
 	return &groupBuilder{
-		conn:   c,
 		client: c.client,
 	}
 }

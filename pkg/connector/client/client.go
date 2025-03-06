@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"path"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
@@ -13,18 +12,7 @@ import (
 )
 
 const (
-	apiDomain   = "graph.microsoft.com"
-	apiVersion  = "v1.0"
-	betaVersion = "beta"
-)
-
-const (
-	managerIDProfileKey          = "managerId"
-	employeeNumberProfileKey     = "employeeNumber"
-	managerEmailProfileKey       = "managerEmail"
-	supervisorIDProfileKey       = "supervisorEId"
-	supervisorEmailProfileKey    = "supervisorEmail"
-	supervisorFullNameProfileKey = "supervisor"
+	apiDomain = "graph.microsoft.com"
 )
 
 var graphReadScopes = []string{
@@ -59,16 +47,6 @@ func NewAzureClient(
 		httpClient:    client,
 		clientFactory: clientFactory,
 	}, nil
-}
-
-func (a *AzureClient) buildBetaURL(reqPath string, v url.Values) string {
-	ux := url.URL{
-		Scheme:   "https",
-		Host:     apiDomain,
-		Path:     path.Join(betaVersion, reqPath),
-		RawQuery: v.Encode(),
-	}
-	return ux.String()
 }
 
 func (a *AzureClient) doRequest(ctx context.Context,
@@ -140,13 +118,12 @@ func (a *AzureClient) requestWithToken(
 	return nil
 }
 
-func (a *AzureClient) FromQueryBuilder(
+func (a *AzureClient) FromPath(
 	ctx context.Context,
-	builder AzureQueryBuilder,
 	path string,
 	res interface{},
 ) error {
-	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, builder.BuildUrl(path), nil, res)
+	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, path, nil, res)
 	if err != nil {
 		return err
 	}
