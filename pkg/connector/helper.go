@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
+
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -306,6 +308,7 @@ func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) 
 		rs.WithAnnotation(
 			&v2.ChildResourceType{ResourceTypeId: resourceGroupResourceType.Id},
 			&v2.ChildResourceType{ResourceTypeId: roleResourceType.Id},
+			&v2.ChildResourceType{ResourceTypeId: storageAccountResourceType.Id},
 		))
 }
 
@@ -693,5 +696,126 @@ func subscriptionRoleId(subscriptionID, roleID string) string {
 		"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
 		subscriptionID,
 		roleID,
+	)
+}
+
+type storageResourceSplitIdData struct {
+	subscriptionID            string
+	resourceGroupName         string
+	resourceProviderNamespace string
+	resourceType              string
+	resourceName              string
+}
+
+func newStorageResourceSplitIdDataFromConnectorId(connectorId string) (*storageResourceSplitIdData, error) {
+	splitValue := strings.Split(connectorId, ":")
+
+	if len(splitValue) != 5 {
+		return nil, fmt.Errorf("invalid storage resource split id")
+	}
+
+	return &storageResourceSplitIdData{
+		subscriptionID:            splitValue[0],
+		resourceGroupName:         splitValue[1],
+		resourceProviderNamespace: splitValue[2],
+		resourceType:              splitValue[3],
+		resourceName:              splitValue[4],
+	}, nil
+}
+
+func (s *storageResourceSplitIdData) ConnectorId() string {
+	return fmt.Sprintf(
+		"%s:%s:%s:%s:%s",
+		s.subscriptionID,
+		s.resourceGroupName,
+		s.resourceProviderNamespace,
+		s.resourceType,
+		s.resourceName,
+	)
+}
+
+func (s *storageResourceSplitIdData) AzureId() string {
+	return fmt.Sprintf(
+		"/subscriptions/%s/resourceGroups/%s/providers/%s/%s/%s",
+		s.subscriptionID,
+		s.resourceGroupName,
+		s.resourceProviderNamespace,
+		s.resourceType,
+		s.resourceName,
+	)
+}
+
+func newStorageResourceSplitIdDataFromAzureId(id string) (*storageResourceSplitIdData, error) {
+	splits := strings.Split(id, "/")
+	// By docs the value should be
+	// Ex - /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/{resourceProviderNamespace}/{resourceType}/{resourceName}
+	if len(splits) != 9 {
+		return nil, fmt.Errorf(
+			"unexpected number of splits, ex: '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/{resourceProviderNamespace}/{resourceType}/{resourceName}', got %s",
+			id,
+		)
+	}
+
+	return &storageResourceSplitIdData{
+		subscriptionID:            splits[2],
+		resourceGroupName:         splits[4],
+		resourceProviderNamespace: splits[6],
+		resourceType:              splits[7],
+		resourceName:              splits[8],
+	}, nil
+}
+
+func storageAccountResource(ctx context.Context, account *armstorage.Account, parent *v2.ResourceId) (*v2.Resource, error) {
+	idData, err := newStorageResourceSplitIdDataFromAzureId(StringValue(account.ID))
+	if err != nil {
+		return nil, err
+	}
+
+	profile := map[string]interface{}{
+		"id":                  StringValue(account.ID),
+		"name":                StringValue(account.Name),
+		"location":            StringValue(account.Location),
+		"type":                StringValue(account.Type),
+		"resource_group_name": idData.resourceGroupName,
+	}
+
+	if account.Kind != nil {
+		profile["kind"] = string(*account.Kind)
+	}
+
+	if account.SKU != nil {
+		if account.SKU.Name != nil {
+			profile["sku_name"] = string(*account.SKU.Name)
+		}
+
+		if account.SKU.Tier != nil {
+			profile["sku_tier"] = string(*account.SKU.Tier)
+		}
+	}
+
+	if account.Identity != nil {
+		if account.Identity.Type != nil {
+			profile["identity_type"] = string(*account.Identity.Type)
+		}
+
+		if account.Identity.PrincipalID != nil {
+			profile["identity_principal_id"] = StringValue(account.Identity.PrincipalID)
+		}
+
+		if account.Identity.TenantID != nil {
+			profile["identity_tenant_id"] = StringValue(account.Identity.TenantID)
+		}
+	}
+
+	appTraits := []rs.AppTraitOption{
+		rs.WithAppProfile(profile),
+	}
+
+	return rs.NewResource(
+		StringValue(account.Name),
+		storageAccountResourceType,
+		idData.ConnectorId(),
+		rs.WithAppTrait(appTraits...),
+		rs.WithParentResourceID(parent),
 	)
 }

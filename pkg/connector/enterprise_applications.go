@@ -195,7 +195,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 		return nil, "", nil, err
 	}
 
-	// Id relarted to Azure resource
+	// AzureId relarted to Azure resource
 	principalId := strings.TrimPrefix(resource.Id.Resource, "applications/")
 
 	// NOTE: We use the Beta URL here because in the v1.0 docs there is this note (last checked August 2023)
@@ -250,7 +250,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 				// TODO: service principals can be managed identities, enterprise applications, or maybe something else entirely.
 				// We need to figure out the resource type instead of hard coding it to be a managed identity.
 				rid.ResourceType = managedIdentitylResourceType.Id
-				// rid.ResourceType = enterpriseApplicationResourceType.Id
+				// rid.ResourceType = enterpriseApplicationResourceType.AzureId
 			default:
 				l.Error("baton-azure-infrastructure: unsupported PrincipalType type on app role assignment", zap.String("principal_type", appRoleAssignment.PrincipalType))
 			}
