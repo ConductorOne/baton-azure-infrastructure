@@ -20,12 +20,16 @@ import (
 	"go.uber.org/zap"
 )
 
+type roleAssignmentCacheValue struct {
+	usedRole        map[string]struct{}
+	rolesAssignment []*armauthorization.RoleAssignment
+}
 type roleBuilder struct {
 	conn                  *Connector
 	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
 	// cache for role assignments
-	// subscriptionID -> RoleDefinitionID -> RoleAssignment
-	cache *GenericCache[map[string]*armauthorization.RoleAssignment]
+	// subscriptionID -> roleAssignmentCacheValue
+	cache *GenericCache[*roleAssignmentCacheValue]
 }
 
 func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -61,7 +65,7 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 				}
 				// omit ok since we know the key exists
 				assignments, _ := r.cache.Get(subscriptionID)
-				_, ok := assignments[*role.ID]
+				_, ok := assignments.usedRole[*role.ID]
 				if !ok {
 					// not in use, should be skipped
 					continue
@@ -121,7 +125,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 	}
 
 	assignments, _ := r.cache.Get(subscriptionID)
-	for _, assignment := range assignments {
+	for _, assignment := range assignments.rolesAssignment {
 		roleDefinitionID := subscriptionRoleId(subscriptionID, roleID)
 		if roleDefinitionID != *assignment.Properties.RoleDefinitionID {
 			continue
@@ -286,7 +290,7 @@ func newRoleBuilder(c *Connector) *roleBuilder {
 	return &roleBuilder{
 		conn:                  c,
 		roleDefinitionsClient: c.roleDefinitionsClient,
-		cache:                 NewGenericCache[map[string]*armauthorization.RoleAssignment](),
+		cache:                 NewGenericCache[*roleAssignmentCacheValue](),
 	}
 }
 
@@ -318,8 +322,12 @@ func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID s
 			return err
 		}
 
-		assignments, _ := r.cache.GetOrSet(subscriptionID, func() (map[string]*armauthorization.RoleAssignment, error) {
-			return make(map[string]*armauthorization.RoleAssignment), nil
+		assignments, _ := r.cache.GetOrSet(subscriptionID, func() (*roleAssignmentCacheValue, error) {
+			value := &roleAssignmentCacheValue{
+				usedRole:        make(map[string]struct{}),
+				rolesAssignment: make([]*armauthorization.RoleAssignment, 0),
+			}
+			return value, nil
 		})
 
 		for _, assignment := range page.Value {
@@ -328,7 +336,8 @@ func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID s
 				continue
 			}
 
-			assignments[*assignment.Properties.RoleDefinitionID] = assignment
+			assignments.usedRole[*assignment.Properties.RoleDefinitionID] = struct{}{}
+			assignments.rolesAssignment = append(assignments.rolesAssignment, assignment)
 		}
 
 		r.cache.Set(subscriptionID, assignments)
