@@ -8,8 +8,8 @@ import (
 type AzureApiVersion string
 
 const (
-	V1   = "v1.0"
-	Beta = "beta"
+	V1   AzureApiVersion = "v1.0"
+	Beta AzureApiVersion = "beta"
 )
 
 type AzureQueryBuilder struct {

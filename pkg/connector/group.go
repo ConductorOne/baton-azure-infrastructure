@@ -136,6 +136,14 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 		return nil, "", nil, err
 	}
 
+	// dubious hack: if we get less than 50 members,
+	// we suspect the NextLink will return an empty set.
+	// this can save us ~50% of all requests when
+	// looking at owners/members of small groups
+	if len(memberShip.Members) <= 50 {
+		memberShip.NextLink = ""
+	}
+
 	if memberShip.NextLink != "" {
 		b.Push(pagination.PageState{
 			ResourceTypeID: ps.ResourceTypeID,
