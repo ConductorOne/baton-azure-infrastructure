@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	"net/mail"
 	"net/url"
 	"path"
@@ -821,4 +822,49 @@ func storageAccountResource(ctx context.Context, account *armstorage.Account, pa
 			&v2.ChildResourceType{ResourceTypeId: containerResourceType.Id},
 		),
 	)
+}
+
+func grantFromRoleAssigment(
+	resource *v2.Resource,
+	entitlementName string,
+	subscriptionID string,
+	in *armauthorization.RoleAssignment,
+) (*v2.Grant, error) {
+	if in.Properties.RoleDefinitionID == nil {
+		return nil, fmt.Errorf("role definition id is nil")
+	}
+
+	// RoleDefinitionID example value
+	// /subscriptions/{subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/{roleId}
+	splitValues := strings.Split(StringValue(in.Properties.RoleDefinitionID), "/")
+	if len(splitValues) != 7 {
+		return nil, fmt.Errorf("invalid role definition id %s", StringValue(in.Properties.RoleDefinitionID))
+	}
+	roleIdFromSplit := splitValues[len(splitValues)-1]
+
+	// roleID : subscriptionID
+	roleId, err := rs.NewResourceID(
+		roleResourceType,
+		fmt.Sprintf("%s:%s", roleIdFromSplit, subscriptionID),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var grantOpts []grant.GrantOption
+	// TODO: review this grant Expandable operation
+	grantOpts = append(grantOpts, grant.WithAnnotation(&v2.GrantExpandable{
+		EntitlementIds: []string{
+			fmt.Sprintf("role:%s:owners", roleId.Resource),
+			fmt.Sprintf("role:%s:assigned", roleId.Resource),
+		},
+		Shallow: true,
+	}))
+
+	return grant.NewGrant(
+		resource,
+		entitlementName,
+		roleId,
+		grantOpts...,
+	), nil
 }
