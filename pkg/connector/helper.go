@@ -427,14 +427,36 @@ func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, pa
 		strRoleID string
 		opts      []rs.ResourceOption
 	)
+
+	var permissionsActions []any
+	var permissionsNotActions []any
+	for _, permission := range role.Properties.Permissions {
+		for _, action := range permission.Actions {
+			permissionsActions = append(permissionsActions, *action)
+		}
+
+		for _, action := range permission.NotActions {
+			permissionsNotActions = append(permissionsNotActions, *action)
+		}
+	}
+
+	var assignedScopes []any
+	for _, scope := range role.Properties.AssignableScopes {
+		assignedScopes = append(assignedScopes, *scope)
+	}
+
 	strRoleID = getRoleId(role.ID) // roleID + subscriptionID
 	profile := map[string]interface{}{
-		"id":                 strRoleID,
-		"name":               StringValue(role.Properties.RoleName),
-		"description":        StringValue(role.Properties.Description),
-		"type":               StringValue(role.Properties.RoleType),
-		"role-definition-id": StringValue(role.ID),
+		"id":                      strRoleID,
+		"name":                    StringValue(role.Properties.RoleName),
+		"description":             StringValue(role.Properties.Description),
+		"type":                    StringValue(role.Properties.RoleType),
+		"role_definition_id":      StringValue(role.ID),
+		"permissions_actions":     permissionsActions,
+		"permissions_not_actions": permissionsNotActions,
+		"assigned_scopes":         assignedScopes,
 	}
+
 	roleTraitOptions := []rs.RoleTraitOption{
 		rs.WithRoleProfile(profile),
 	}
