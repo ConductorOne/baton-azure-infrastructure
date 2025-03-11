@@ -817,5 +817,8 @@ func storageAccountResource(ctx context.Context, account *armstorage.Account, pa
 		idData.ConnectorId(),
 		rs.WithAppTrait(appTraits...),
 		rs.WithParentResourceID(parent),
+		rs.WithAnnotation(
+			&v2.ChildResourceType{ResourceTypeId: containerResourceType.Id},
+		),
 	)
 }

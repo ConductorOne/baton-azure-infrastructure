@@ -45,6 +45,8 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newEnterpriseApplicationsBuilder(d),
 		newRoleBuilder(d),
 		newStorageAccountBuilder(d),
+		newContainerBuilder(d),
+		newBlobBuilder(d),
 	}
 	return syncers
 }
