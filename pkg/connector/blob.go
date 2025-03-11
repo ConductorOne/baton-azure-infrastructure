@@ -25,6 +25,9 @@ func (usr *blobBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 		return nil, "", nil, nil
 	}
 
+	// TODO: disable until I get access to blobs
+	return nil, "", nil, nil
+
 	if parentResourceID.ResourceType != containerResourceType.Id {
 		return nil, "", nil, fmt.Errorf("invalid resource type: %s", parentResourceID.ResourceType)
 	}

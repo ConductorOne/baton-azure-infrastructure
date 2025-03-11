@@ -3,16 +3,12 @@ package connector
 import (
 	"context"
 	"fmt"
-	"strings"
-
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
-	"github.com/conductorone/baton-sdk/pkg/types/grant"
-	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 )
 
 type storageAccountBuilder struct {
@@ -108,43 +104,7 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 		}
 
 		convertErr, err := ConvertErr(result.Value, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
-			if in.Properties.RoleDefinitionID == nil {
-				return nil, fmt.Errorf("role definition id is nil")
-			}
-
-			// RoleDefinitionID example value
-			// /subscriptions/{subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/{roleId}
-			splitValues := strings.Split(StringValue(in.Properties.RoleDefinitionID), "/")
-			if len(splitValues) != 7 {
-				return nil, fmt.Errorf("invalid role definition id %s", StringValue(in.Properties.RoleDefinitionID))
-			}
-			roleIdFromSplit := splitValues[len(splitValues)-1]
-
-			// roleID : subscriptionID
-			roleId, err := rs.NewResourceID(
-				roleResourceType,
-				fmt.Sprintf("%s:%s", roleIdFromSplit, storageResourceIDs.subscriptionID),
-			)
-			if err != nil {
-				return nil, err
-			}
-
-			grantOpts := []grant.GrantOption{}
-			// TODO: review this grant Expandable operation
-			grantOpts = append(grantOpts, grant.WithAnnotation(&v2.GrantExpandable{
-				EntitlementIds: []string{
-					fmt.Sprintf("role:%s:owners", roleId.Resource),
-					fmt.Sprintf("role:%s:assigned", roleId.Resource),
-				},
-				Shallow: true,
-			}))
-
-			return grant.NewGrant(
-				resource,
-				"assignment",
-				roleId,
-				grantOpts...,
-			), nil
+			return grantFromRoleAssigment(resource, "assignment", storageResourceIDs.subscriptionID, in)
 		})
 
 		if err != nil {

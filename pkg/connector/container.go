@@ -3,11 +3,14 @@ package connector
 import (
 	"context"
 	"fmt"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	azService "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"strings"
 )
@@ -16,7 +19,8 @@ var serviceUrlTemplate = "https://%s.blob.core.windows.net/"
 
 // containerBuilder syncs Container given an StorageAccount
 type containerBuilder struct {
-	conn *Connector
+	client *client.AzureClient
+	conn   *Connector
 }
 
 func (usr *containerBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -85,12 +89,57 @@ func (usr *containerBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 
 // Entitlements always returns an empty slice for users.
 func (usr *containerBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+	rv := []*v2.Entitlement{
+		entitlement.NewPermissionEntitlement(
+			resource,
+			"assignment",
+			entitlement.WithDisplayName(fmt.Sprintf("Access to %s", resource.DisplayName)),
+			entitlement.WithDescription(fmt.Sprintf("Access to %s", resource.DisplayName)),
+			entitlement.WithGrantableTo(roleResourceType),
+			entitlement.WithAnnotation(&v2.EntitlementImmutable{}),
+		),
+	}
+
+	return rv, "", nil, nil
 }
 
 // Grants always returns an empty slice for users since they don't have any entitlements.
 func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+	if resource.ParentResourceId == nil || resource.ParentResourceId.ResourceType != storageAccountResourceType.Id {
+		return nil, "", nil, fmt.Errorf("container resource must have a parent resource from type %s", storageAccountResourceType.Id)
+	}
+
+	parsedParentId, err := newStorageResourceSplitIdDataFromConnectorId(resource.ParentResourceId.Resource)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	idSplit := strings.Split(resource.Id.Resource, ":")
+	if len(idSplit) != 2 {
+		return nil, "", nil, fmt.Errorf("invalid resource id: %s", resource.Id.Resource)
+	}
+
+	containerName := idSplit[1]
+
+	scope := fmt.Sprintf("%s/blobServices/default/containers/%s", parsedParentId.AzureId(), containerName)
+	assignments, err := usr.client.GetRoleAssignments(ctx, parsedParentId.subscriptionID, scope)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	grants, err := ConvertErr(assignments, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
+		return grantFromRoleAssigment(
+			resource,
+			"assignment",
+			parsedParentId.subscriptionID,
+			in,
+		)
+	})
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return grants, "", nil, nil
 }
 
 func containerResource(storageAccountName string, container *azService.ContainerItem, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
@@ -122,6 +171,7 @@ func containerResource(storageAccountName string, container *azService.Container
 
 func newContainerBuilder(conn *Connector) *containerBuilder {
 	return &containerBuilder{
-		conn: conn,
+		conn:   conn,
+		client: conn.client,
 	}
 }
