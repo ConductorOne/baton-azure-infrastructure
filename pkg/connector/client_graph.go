@@ -121,16 +121,16 @@ func (c *Connector) doRequest(ctx context.Context,
 		defer resp.Body.Close()
 	}
 
+	if err != nil {
+		return nil, err
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		resMessage, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("microsoft-azure-infrastructure: failed to read response body: %w", err)
 		}
 		return nil, fmt.Errorf("microsoft-azure-infrastructure: %s, '%s', %w: %s", method, urlAddress.String(), ErrRequestFailed, string(resMessage))
-	}
-
-	if err != nil {
-		return nil, err
 	}
 
 	rawResp, err := io.ReadAll(resp.Body)
