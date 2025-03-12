@@ -26,9 +26,6 @@ func (usr *blobBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 		return nil, "", nil, nil
 	}
 
-	// TODO: disable until I get access to blobs
-	return nil, "", nil, nil
-
 	storageAccountIdSplit := strings.Split(parentResourceID.Resource, ":")
 
 	if len(storageAccountIdSplit) != 2 {
