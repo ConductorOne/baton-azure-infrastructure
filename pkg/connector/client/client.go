@@ -7,7 +7,6 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
 )
 
@@ -25,11 +24,10 @@ var graphReadScopes = []string{
 }
 
 type AzureClient struct {
-	token         azcore.TokenCredential
-	httpClient    *uhttp.BaseHttpClient
-	clientFactory *armsubscription.ClientFactory
-	skipAdGroups  bool
-	graphDomain   string
+	token        azcore.TokenCredential
+	httpClient   *uhttp.BaseHttpClient
+	skipAdGroups bool
+	graphDomain  string
 }
 
 func NewAzureClient(
@@ -44,17 +42,11 @@ func NewAzureClient(
 		return nil, err
 	}
 
-	clientFactory, err := armsubscription.NewClientFactory(token, nil)
-	if err != nil {
-		return nil, err
-	}
-
 	return &AzureClient{
-		token:         token,
-		httpClient:    client,
-		clientFactory: clientFactory,
-		graphDomain:   graphDomain,
-		skipAdGroups:  skipAdGroups,
+		token:        token,
+		httpClient:   client,
+		graphDomain:  graphDomain,
+		skipAdGroups: skipAdGroups,
 	}, nil
 }
 
