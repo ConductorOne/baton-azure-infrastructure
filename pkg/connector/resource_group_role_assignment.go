@@ -51,7 +51,7 @@ func (ra *roleAssignmentResourceGroupBuilder) List(ctx context.Context, parentRe
 				return nil, "", nil, err
 			}
 
-			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, ra.conn.token, nil)
+			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, ra.conn.token, ra.conn.client.ArmOptions())
 			if err != nil {
 				return nil, "", nil, err
 			}
@@ -124,7 +124,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resour
 	}
 
 	// Create a Role Assignments Client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, ra.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, ra.conn.token, ra.conn.client.ArmOptions())
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -186,7 +186,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grant(ctx context.Context, princip
 	roleId := entitlementIDs[2]
 	principalID := principal.Id.Resource // Object ID of the user, group, or service principal
 	// Initialize the client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, ra.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, ra.conn.token, ra.conn.client.ArmOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +284,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Revoke(ctx context.Context, grant 
 	}
 
 	// Create a RoleAssignmentsClient
-	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, ra.conn.token, nil)
+	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, ra.conn.token, ra.conn.client.ArmOptions())
 	if err != nil {
 		return nil, err
 	}
