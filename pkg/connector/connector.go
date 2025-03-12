@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"io"
 	"net/http"
 
@@ -93,16 +92,12 @@ func NewConnectorFromToken(
 		return t.ID
 	})
 
-	clientFactory, err := armsubscription.NewClientFactory(token, &arm.ClientOptions{
-		ClientOptions: azureClient.Options(),
-	})
+	clientFactory, err := armsubscription.NewClientFactory(token, azureClient.ArmOptions())
 	if err != nil {
 		return nil, err
 	}
 
-	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(token, &arm.ClientOptions{
-		ClientOptions: azureClient.Options(),
-	})
+	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(token, azureClient.ArmOptions())
 	if err != nil {
 		return nil, err
 	}

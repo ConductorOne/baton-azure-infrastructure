@@ -14,7 +14,7 @@ func (a *AzureClient) GetRoleAssignments(
 	roleClient, err := armauthorization.NewRoleAssignmentsClient(
 		subscriptionID,
 		a.token,
-		nil,
+		a.ArmOptions(),
 	)
 	if err != nil {
 		return nil, err

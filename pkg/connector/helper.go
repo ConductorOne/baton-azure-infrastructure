@@ -607,7 +607,10 @@ func enterpriseApplicationResource(ctx context.Context, app *client.ServicePrinc
 func getAllRoles(ctx context.Context, conn *Connector, subscriptionID string) ([]string, error) {
 	lstRoles := []string{}
 	// Initialize the RoleDefinitionsClient
-	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(conn.token, nil)
+	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(
+		conn.token,
+		conn.client.ArmOptions(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -667,7 +670,11 @@ func getResourceGroups(ctx context.Context, conn *Connector) ([]string, error) {
 		}
 
 		for _, subscription := range page.Value {
-			resourceGroupsClient, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, conn.token, nil)
+			resourceGroupsClient, err := armresources.NewResourceGroupsClient(
+				*subscription.SubscriptionID,
+				conn.token,
+				conn.client.ArmOptions(),
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -690,7 +697,7 @@ func getResourceGroups(ctx context.Context, conn *Connector) ([]string, error) {
 
 func getAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID, roleId, principalID string) (string, error) {
 	// Create a Role Assignments Client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, conn.token, conn.client.ArmOptions())
 	if err != nil {
 		return "", err
 	}

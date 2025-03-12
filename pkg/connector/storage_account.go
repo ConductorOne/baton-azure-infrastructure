@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
@@ -35,9 +34,7 @@ func (usr *storageAccountBuilder) List(ctx context.Context, parentResourceID *v2
 	factory, err := armstorage.NewClientFactory(
 		parentResourceID.Resource,
 		usr.conn.token,
-		&arm.ClientOptions{
-			ClientOptions: usr.conn.client.Options(),
-		},
+		usr.conn.client.ArmOptions(),
 	)
 
 	if err != nil {
