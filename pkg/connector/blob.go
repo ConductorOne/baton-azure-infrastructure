@@ -37,7 +37,7 @@ func (usr *blobBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 
 	serviceUrl := fmt.Sprintf(serviceUrlTemplate, storageAccountName)
 
-	azBlobClient, err := azblob.NewClient(serviceUrl, usr.conn.token, nil)
+	azBlobClient, err := usr.conn.client.AzBlobClient(serviceUrl)
 	if err != nil {
 		return nil, "", nil, err
 	}

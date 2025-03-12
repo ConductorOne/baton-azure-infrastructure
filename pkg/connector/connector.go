@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"io"
 	"net/http"
 
@@ -23,7 +24,6 @@ import (
 
 type Connector struct {
 	token                 azcore.TokenCredential
-	httpClient            *uhttp.BaseHttpClient
 	MailboxSettings       bool
 	SkipAdGroups          bool
 	organizationIDs       []string
@@ -80,16 +80,6 @@ func NewConnectorFromToken(
 	graphDomain string,
 	skipUnusedRoles bool,
 ) (*Connector, error) {
-	baseClient, err := uhttp.NewBaseHttpClientWithContext(ctx, httpClient)
-	if err != nil {
-		return nil, err
-	}
-
-	clientFactory, err := armsubscription.NewClientFactory(token, nil)
-	if err != nil {
-		return nil, err
-	}
-
 	azureClient, err := client.NewAzureClient(ctx, httpClient, token, skipAdGroups, graphDomain)
 	if err != nil {
 		return nil, err
@@ -99,37 +89,36 @@ func NewConnectorFromToken(
 	if err != nil {
 		return nil, err
 	}
-
 	organizationIDs := iter.Map(organizations, func(t *client.Organization) string {
 		return t.ID
 	})
 
-	c := &Connector{
-		token:           token,
-		httpClient:      baseClient,
-		MailboxSettings: mailboxSettings,
-		SkipAdGroups:    skipAdGroups,
-		clientFactory:   clientFactory,
-		client:          azureClient,
-		organizationIDs: organizationIDs,
-		SkipUnusedRoles: skipUnusedRoles,
-	}
-
-	roleDefinitionsClient, err := c.getRoleDefinitionsClient()
+	clientFactory, err := armsubscription.NewClientFactory(token, &arm.ClientOptions{
+		ClientOptions: azureClient.Options(),
+	})
 	if err != nil {
 		return nil, err
 	}
-	c.roleDefinitionsClient = roleDefinitionsClient
+
+	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(token, &arm.ClientOptions{
+		ClientOptions: azureClient.Options(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	c := &Connector{
+		token:                 token,
+		MailboxSettings:       mailboxSettings,
+		SkipAdGroups:          skipAdGroups,
+		clientFactory:         clientFactory,
+		client:                azureClient,
+		organizationIDs:       organizationIDs,
+		SkipUnusedRoles:       skipUnusedRoles,
+		roleDefinitionsClient: roleDefinitionsClient,
+	}
 
 	return c, nil
-}
-
-func (d *Connector) getRoleDefinitionsClient() (*armauthorization.RoleDefinitionsClient, error) {
-	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(d.token, nil)
-	if err != nil {
-		return nil, err
-	}
-	return roleDefinitionsClient, nil
 }
 
 // New returns a new instance of the connector.
