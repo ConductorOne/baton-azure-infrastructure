@@ -3,13 +3,14 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	azContainer "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
-	"strings"
 )
 
 type blobBuilder struct {
@@ -27,10 +28,6 @@ func (usr *blobBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 
 	// TODO: disable until I get access to blobs
 	return nil, "", nil, nil
-
-	if parentResourceID.ResourceType != containerResourceType.Id {
-		return nil, "", nil, fmt.Errorf("invalid resource type: %s", parentResourceID.ResourceType)
-	}
 
 	storageAccountIdSplit := strings.Split(parentResourceID.Resource, ":")
 
