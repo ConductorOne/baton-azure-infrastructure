@@ -3,6 +3,8 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	azService "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
@@ -12,12 +14,11 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
-	"strings"
 )
 
 var serviceUrlTemplate = "https://%s.blob.core.windows.net/"
 
-// containerBuilder syncs Container given an StorageAccount
+// containerBuilder syncs Container given an StorageAccount.
 type containerBuilder struct {
 	client *client.AzureClient
 	conn   *Connector

@@ -3,12 +3,13 @@ package connector
 import (
 	"context"
 	"fmt"
-	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	"net/mail"
 	"net/url"
 	"path"
 	"slices"
 	"strings"
+
+	"github.com/conductorone/baton-sdk/pkg/types/grant"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 

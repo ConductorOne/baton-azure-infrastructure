@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
