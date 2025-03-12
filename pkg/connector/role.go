@@ -6,40 +6,30 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
+	"time"
 
-	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
-	uuid "github.com/google/uuid"
+	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	zap "go.uber.org/zap"
+	"go.uber.org/zap"
 )
 
+type roleAssignmentCacheValue struct {
+	usedRole        map[string]struct{}
+	rolesAssignment []*armauthorization.RoleAssignment
+}
 type roleBuilder struct {
 	conn                  *Connector
 	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
-	// key subscriptionID
-	// value array of role assignments for that subscriptionID
-	subIdRoleAssignmentsCache map[string][]*armauthorization.RoleAssignment
-	mu                        sync.RWMutex
-}
-
-func (r *roleBuilder) cacheGet(id string) ([]*armauthorization.RoleAssignment, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	value, ok := r.subIdRoleAssignmentsCache[id]
-	return value, ok
-}
-
-func (r *roleBuilder) cacheSet(id string, value []*armauthorization.RoleAssignment) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.subIdRoleAssignmentsCache[id] = value
+	// cache for role assignments
+	// subscriptionID -> roleAssignmentCacheValue
+	cache *GenericCache[*roleAssignmentCacheValue]
 }
 
 func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -64,6 +54,24 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 
 		// Iterate over role definitions
 		for _, role := range resp.Value {
+			if r.conn.SkipUnusedRoles {
+				if role.ID == nil {
+					continue
+				}
+
+				err := r.cacheRoleAssignments(ctx, subscriptionID)
+				if err != nil {
+					return nil, "", nil, err
+				}
+				// omit ok since we know the key exists
+				assignments, _ := r.cache.Get(subscriptionID)
+				_, ok := assignments.usedRole[*role.ID]
+				if !ok {
+					// not in use, should be skipped
+					continue
+				}
+			}
+
 			rs, err := roleResource(ctx, role, &v2.ResourceId{
 				ResourceType: subscriptionsResourceType.Id,
 				Resource:     StringValue(&subscriptionID),
@@ -116,12 +124,9 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 		return nil, "", nil, err
 	}
 
-	assignments, _ := r.cacheGet(subscriptionID)
-	for _, assignment := range assignments {
-		roleDefinitionID := fmt.Sprintf(
-			"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
-			subscriptionID,
-			roleID)
+	assignments, _ := r.cache.Get(subscriptionID)
+	for _, assignment := range assignments.rolesAssignment {
+		roleDefinitionID := subscriptionRoleId(subscriptionID, roleID)
 		if roleDefinitionID != *assignment.Properties.RoleDefinitionID {
 			continue
 		}
@@ -165,7 +170,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	principalID := principal.Id.Resource // Object ID of the user, group, or service principal
 
 	// Initialize the client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, r.conn.client.ArmOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +178,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	// Define your scope
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionId)
 	// Define the details of the role assignment
-	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
+	roleDefinitionID := subscriptionRoleId(subscriptionId, roleId)
 	// Create a role assignment name (must be unique)
 	roleAssignmentId := uuid.New().String()
 	// Prepare role assignment parameters
@@ -258,7 +263,7 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	}
 
 	// Create a RoleAssignmentsClient
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, r.conn.client.ArmOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -283,19 +288,28 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 
 func newRoleBuilder(c *Connector) *roleBuilder {
 	return &roleBuilder{
-		conn:                      c,
-		roleDefinitionsClient:     c.roleDefinitionsClient,
-		subIdRoleAssignmentsCache: make(map[string][]*armauthorization.RoleAssignment),
+		conn:                  c,
+		roleDefinitionsClient: c.roleDefinitionsClient,
+		cache:                 NewGenericCache[*roleAssignmentCacheValue](),
 	}
 }
 
 func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID string) error {
-	if _, ok := r.cacheGet(subscriptionID); ok {
+	l := ctxzap.Extract(ctx)
+
+	if _, ok := r.cache.Get(subscriptionID); ok {
 		return nil
 	}
 
+	l.Info(
+		"baton-azure-infrastructure: caching role assignments",
+		zap.String("subscription_id", subscriptionID),
+	)
+
+	start := time.Now()
+
 	// Create a Role Assignments Client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.conn.token, r.conn.client.ArmOptions())
 	if err != nil {
 		return err
 	}
@@ -308,9 +322,32 @@ func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID s
 			return err
 		}
 
-		assignments, _ := r.cacheGet(subscriptionID)
-		r.cacheSet(subscriptionID, append(assignments, page.Value...))
+		assignments, _ := r.cache.GetOrSet(subscriptionID, func() (*roleAssignmentCacheValue, error) {
+			value := &roleAssignmentCacheValue{
+				usedRole:        make(map[string]struct{}),
+				rolesAssignment: make([]*armauthorization.RoleAssignment, 0),
+			}
+			return value, nil
+		})
+
+		for _, assignment := range page.Value {
+			if assignment.Properties == nil && assignment.Properties.RoleDefinitionID != nil {
+				l.Warn("baton-azure-infrastructure: role assignment properties are nil")
+				continue
+			}
+
+			assignments.usedRole[*assignment.Properties.RoleDefinitionID] = struct{}{}
+			assignments.rolesAssignment = append(assignments.rolesAssignment, assignment)
+		}
+
+		r.cache.Set(subscriptionID, assignments)
 	}
+
+	l.Info(
+		"baton-azure-infrastructure: role assignments cached successfully",
+		zap.String("subscription_id", subscriptionID),
+		zap.Duration("duration", time.Since(start)),
+	)
 
 	return nil
 }

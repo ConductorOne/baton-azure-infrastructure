@@ -24,6 +24,12 @@ type roleAssignmentResourceGroupBuilder struct {
 	conn *Connector
 }
 
+func newRoleAssignmentResourceGroupBuilder(conn *Connector) *roleAssignmentResourceGroupBuilder {
+	return &roleAssignmentResourceGroupBuilder{
+		conn: conn,
+	}
+}
+
 const invalidRoleID = "invalid role id"
 
 func (ra *roleAssignmentResourceGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -45,7 +51,7 @@ func (ra *roleAssignmentResourceGroupBuilder) List(ctx context.Context, parentRe
 				return nil, "", nil, err
 			}
 
-			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, ra.conn.token, nil)
+			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, ra.conn.token, ra.conn.client.ArmOptions())
 			if err != nil {
 				return nil, "", nil, err
 			}
@@ -118,7 +124,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resour
 	}
 
 	// Create a Role Assignments Client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, ra.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, ra.conn.token, ra.conn.client.ArmOptions())
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -134,10 +140,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resour
 		}
 
 		for _, roleAssignment := range page.Value {
-			roleDefinitionID := fmt.Sprintf(
-				"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
-				subscriptionID,
-				roleID)
+			roleDefinitionID := subscriptionRoleId(subscriptionID, roleID)
 			if roleDefinitionID != *roleAssignment.Properties.RoleDefinitionID {
 				continue
 			}
@@ -183,7 +186,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grant(ctx context.Context, princip
 	roleId := entitlementIDs[2]
 	principalID := principal.Id.Resource // Object ID of the user, group, or service principal
 	// Initialize the client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, ra.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, ra.conn.token, ra.conn.client.ArmOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +194,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grant(ctx context.Context, princip
 	// Define your resource scope
 	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionId, resourceGroupId)
 	// Define the details of the role assignment
-	roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionId, roleId)
+	roleDefinitionID := subscriptionRoleId(subscriptionId, roleId)
 	// Create a role assignment name (must be unique)
 	roleAssignmentId := uuid.New().String()
 	// Prepare role assignment parameters
@@ -281,7 +284,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Revoke(ctx context.Context, grant 
 	}
 
 	// Create a RoleAssignmentsClient
-	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, ra.conn.token, nil)
+	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, ra.conn.token, ra.conn.client.ArmOptions())
 	if err != nil {
 		return nil, err
 	}
