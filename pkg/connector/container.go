@@ -164,9 +164,6 @@ func containerResource(storageAccountName string, container *azService.Container
 		fmt.Sprintf("%s:%s", storageAccountName, StringValue(container.Name)),
 		rs.WithAppTrait(appTraits...),
 		rs.WithParentResourceID(parentResourceID),
-		rs.WithAnnotation(
-			&v2.ChildResourceType{ResourceTypeId: blobResourceType.Id},
-		),
 	)
 }
 
