@@ -101,83 +101,105 @@ func (usr *storageAccountBuilder) Entitlements(_ context.Context, resource *v2.R
 
 // Grants always returns an empty slice for users since they don't have any entitlements.
 func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+
+	// Stores RoleDefinitionIds
+	bag := pagination.GenBag[string]{}
+
+	err := bag.Unmarshal(pToken.Token)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
 	storageResourceIDs, err := newStorageResourceSplitIdDataFromConnectorId(resource.Id.Resource)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	client, err := armauthorization.NewRoleAssignmentsClient(
-		storageResourceIDs.subscriptionID,
-		usr.conn.token,
-		nil,
-	)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	var grants []*v2.Grant
-
-	rolesAssignments := client.NewListForScopePager(storageResourceIDs.AzureId(), nil)
-
-	for rolesAssignments.More() {
-		result, err := rolesAssignments.NextPage(ctx)
+	// Init state
+	if bag.Current() == nil {
+		client, err := armauthorization.NewRoleAssignmentsClient(
+			storageResourceIDs.subscriptionID,
+			usr.conn.token,
+			nil,
+		)
 		if err != nil {
 			return nil, "", nil, err
 		}
 
-		convertErr, err := ConvertErr(result.Value, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
-			return grantFromRoleAssigment(resource, "assignment", storageResourceIDs.subscriptionID, in)
-		})
+		var grants []*v2.Grant
 
-		if err != nil {
-			return nil, "", nil, err
-		}
+		rolesAssignments := client.NewListForScopePager(storageResourceIDs.AzureId(), nil)
 
-		grants = append(grants, convertErr...)
+		for rolesAssignments.More() {
+			result, err := rolesAssignments.NextPage(ctx)
+			if err != nil {
+				return nil, "", nil, err
+			}
 
-		// TODO: Convert to pagination
-		for _, assignment := range result.Value {
-			roleDefinitionId := StringValue(assignment.Properties.RoleDefinitionID)
+			convertErr, err := ConvertErr(result.Value, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
 
-			roleDefinition, err := usr.cacheRole.GetOrSet(roleDefinitionId, func() (armauthorization.RoleDefinitionsClientGetByIDResponse, error) {
-				return usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
+				bag.Push(StringValue(in.Properties.RoleDefinitionID))
+
+				return grantFromRoleAssigment(resource, "assignment", storageResourceIDs.subscriptionID, in)
 			})
 
 			if err != nil {
 				return nil, "", nil, err
 			}
 
-			actions, err := rolemapper.StorageAccountPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
-			if err != nil {
-				return nil, "", nil, err
-			}
+			grants = append(grants, convertErr...)
 
-			for _, action := range actions {
-				plainRoleId, err := roleIdFromRoleDefinitionId(roleDefinitionId)
-				if err != nil {
-					return nil, "", nil, err
-				}
-
-				roleResourceId, err := rs.NewResourceID(
-					roleResourceType,
-					fmt.Sprintf("%s:%s", plainRoleId, storageResourceIDs.subscriptionID),
-				)
-
-				if err != nil {
-					return nil, "", nil, err
-				}
-
-				newGrant, err := grantFromRole(resource, action, roleResourceId)
-				if err != nil {
-					return nil, "", nil, err
-				}
-
-				grants = append(grants, newGrant)
-			}
 		}
+
+		nextToken, err := bag.Marshal()
+
+		return grants, nextToken, nil, nil
 	}
 
-	return grants, "", nil, nil
+	// Get the current state
+	state := bag.Pop()
+
+	roleDefinitionId := StringValue(state)
+	roleDefinition, err := usr.cacheRole.GetOrSet(roleDefinitionId, func() (armauthorization.RoleDefinitionsClientGetByIDResponse, error) {
+		return usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
+	})
+
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	actions, err := rolemapper.StorageAccountPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	var grants []*v2.Grant
+	for _, action := range actions {
+		plainRoleId, err := roleIdFromRoleDefinitionId(roleDefinitionId)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		roleResourceId, err := rs.NewResourceID(
+			roleResourceType,
+			fmt.Sprintf("%s:%s", plainRoleId, storageResourceIDs.subscriptionID),
+		)
+
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		newGrant, err := grantFromRole(resource, action, roleResourceId)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		grants = append(grants, newGrant)
+	}
+
+	nextToken, err := bag.Marshal()
+
+	return grants, nextToken, nil, nil
 }
 
 func newStorageAccountBuilder(conn *Connector) *storageAccountBuilder {
