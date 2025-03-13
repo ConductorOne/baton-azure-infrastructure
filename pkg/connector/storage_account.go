@@ -101,7 +101,6 @@ func (usr *storageAccountBuilder) Entitlements(_ context.Context, resource *v2.R
 
 // Grants always returns an empty slice for users since they don't have any entitlements.
 func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-
 	// Stores RoleDefinitionIds
 	bag := pagination.GenBag[string]{}
 
@@ -137,7 +136,6 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 			}
 
 			convertErr, err := ConvertErr(result.Value, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
-
 				bag.Push(StringValue(in.Properties.RoleDefinitionID))
 
 				return grantFromRoleAssigment(resource, "assignment", storageResourceIDs.subscriptionID, in)
@@ -148,10 +146,12 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 			}
 
 			grants = append(grants, convertErr...)
-
 		}
 
 		nextToken, err := bag.Marshal()
+		if err != nil {
+			return nil, "", nil, err
+		}
 
 		return grants, nextToken, nil, nil
 	}
@@ -198,6 +198,9 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 	}
 
 	nextToken, err := bag.Marshal()
+	if err != nil {
+		return nil, "", nil, err
+	}
 
 	return grants, nextToken, nil, nil
 }
