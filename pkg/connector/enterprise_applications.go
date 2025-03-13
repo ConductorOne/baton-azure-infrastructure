@@ -90,8 +90,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 	{
 		ownersEntId := enterpriseApplicationsEntitlementId{
-			Type:     ownersStr,
-			Resource: resource.Id.Resource,
+			Type: ownersStr,
 		}
 
 		ownersEntIdString, err := ownersEntId.MarshalString()
@@ -121,7 +120,6 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 		// and then someone with a specific role assignment
 		defaultAppRoleAssignmentStringer := enterpriseApplicationsEntitlementId{
 			Type:      appRoleStr,
-			Resource:  resource.Id.Resource,
 			AppRoleId: defaultAppRoleAssignmentID,
 		}
 
@@ -157,7 +155,6 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 		appRoleAssignmentId := enterpriseApplicationsEntitlementId{
 			Type:      appRoleStr,
-			Resource:  resource.Id.Resource,
 			AppRoleId: appRole.Id,
 		}
 
@@ -257,8 +254,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 
 			return grant.NewGrant(
 				resource,
-				fmt.Sprintf("%s:assignment:%s",
-					resource.Id.Resource,
+				fmt.Sprintf("assignment:%s",
 					appRoleAssignment.AppRoleId,
 				),
 				rid,
@@ -356,7 +352,6 @@ func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuild
 
 type enterpriseApplicationsEntitlementId struct {
 	Type      string
-	Resource  string
 	AppRoleId string
 }
 
@@ -365,7 +360,6 @@ func (id *enterpriseApplicationsEntitlementId) MarshalString() (string, error) {
 	case appRoleStr:
 		return strings.Join(
 			[]string{
-				id.Resource,
 				assignmentStr,
 				id.AppRoleId,
 			},
@@ -373,7 +367,6 @@ func (id *enterpriseApplicationsEntitlementId) MarshalString() (string, error) {
 	case ownersStr:
 		return strings.Join(
 			[]string{
-				id.Resource,
 				ownersStr,
 			},
 			":"), nil
@@ -385,13 +378,12 @@ func (id *enterpriseApplicationsEntitlementId) MarshalString() (string, error) {
 func (id *enterpriseApplicationsEntitlementId) UnmarshalString(input string) error {
 	parts := strings.Split(input, ":")
 	if len(parts) < 3 {
-		return errors.New("baton-microsoft-entra: invalid entitlement id")
+		return errors.New("baton-azure-infrastructure: invalid entitlement id")
 	}
-	id.Type = parts[2]
-	id.Resource = parts[1]
+	id.Type = parts[1]
 	if id.Type == assignmentStr {
-		if len(parts) < 4 {
-			return errors.New("baton-microsoft-entra: invalid entitlement id: missing approle id")
+		if len(parts) < 3 {
+			return errors.New("baton-azure-infrastructure: invalid entitlement id: missing approle id")
 		}
 		id.AppRoleId = parts[3]
 	}
