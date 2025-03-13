@@ -6,14 +6,17 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 )
 
 type storageAccountBuilder struct {
-	conn *Connector
+	conn      *Connector
+	cacheRole *GenericCache[armauthorization.RoleDefinitionsClientGetByIDResponse]
 }
 
 func (usr *storageAccountBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -80,6 +83,19 @@ func (usr *storageAccountBuilder) Entitlements(_ context.Context, resource *v2.R
 		),
 	}
 
+	for _, value := range rolemapper.StorageAccountPermissions.Actions() {
+		ent := entitlement.NewPermissionEntitlement(
+			resource,
+			value,
+			entitlement.WithDisplayName(fmt.Sprintf("Can %s %s", value, resource.DisplayName)),
+			entitlement.WithDescription(fmt.Sprintf("%s Storage account %s", value, resource.DisplayName)),
+			entitlement.WithGrantableTo(roleResourceType),
+			entitlement.WithAnnotation(&v2.EntitlementImmutable{}),
+		)
+
+		rv = append(rv, ent)
+	}
+
 	return rv, "", nil, nil
 }
 
@@ -118,6 +134,47 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 		}
 
 		grants = append(grants, convertErr...)
+
+		// TODO: Convert to pagination
+		for _, assignment := range result.Value {
+			roleDefinitionId := StringValue(assignment.Properties.RoleDefinitionID)
+
+			roleDefinition, err := usr.cacheRole.GetOrSet(roleDefinitionId, func() (armauthorization.RoleDefinitionsClientGetByIDResponse, error) {
+				return usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
+			})
+
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			actions, err := rolemapper.StorageAccountPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			for _, action := range actions {
+				plainRoleId, err := roleIdFromRoleDefinitionId(roleDefinitionId)
+				if err != nil {
+					return nil, "", nil, err
+				}
+
+				roleResourceId, err := rs.NewResourceID(
+					roleResourceType,
+					fmt.Sprintf("%s:%s", plainRoleId, storageResourceIDs.subscriptionID),
+				)
+
+				if err != nil {
+					return nil, "", nil, err
+				}
+
+				newGrant, err := grantFromRole(resource, action, roleResourceId)
+				if err != nil {
+					return nil, "", nil, err
+				}
+
+				grants = append(grants, newGrant)
+			}
+		}
 	}
 
 	return grants, "", nil, nil
@@ -125,6 +182,7 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 
 func newStorageAccountBuilder(conn *Connector) *storageAccountBuilder {
 	return &storageAccountBuilder{
-		conn: conn,
+		conn:      conn,
+		cacheRole: NewGenericCache[armauthorization.RoleDefinitionsClientGetByIDResponse](),
 	}
 }
