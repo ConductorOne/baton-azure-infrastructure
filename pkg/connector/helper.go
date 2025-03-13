@@ -854,6 +854,14 @@ func storageAccountResource(ctx context.Context, account *armstorage.Account, pa
 	)
 }
 
+func roleIdFromRoleDefinitionId(roleDefinitionId string) (string, error) {
+	splitValues := strings.Split(roleDefinitionId, "/")
+	if len(splitValues) != 7 {
+		return "", fmt.Errorf("invalid role definition id %s", roleDefinitionId)
+	}
+	return splitValues[len(splitValues)-1], nil
+}
+
 func grantFromRoleAssigment(
 	resource *v2.Resource,
 	entitlementName string,
@@ -864,13 +872,10 @@ func grantFromRoleAssigment(
 		return nil, fmt.Errorf("role definition id is nil")
 	}
 
-	// RoleDefinitionID example value
-	// /subscriptions/{subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/{roleId}
-	splitValues := strings.Split(StringValue(in.Properties.RoleDefinitionID), "/")
-	if len(splitValues) != 7 {
-		return nil, fmt.Errorf("invalid role definition id %s", StringValue(in.Properties.RoleDefinitionID))
+	roleIdFromSplit, err := roleIdFromRoleDefinitionId(*in.Properties.RoleDefinitionID)
+	if err != nil {
+		return nil, err
 	}
-	roleIdFromSplit := splitValues[len(splitValues)-1]
 
 	// roleID : subscriptionID
 	roleId, err := rs.NewResourceID(
@@ -881,6 +886,14 @@ func grantFromRoleAssigment(
 		return nil, err
 	}
 
+	return grantFromRole(resource, entitlementName, roleId)
+}
+
+func grantFromRole(
+	resource *v2.Resource,
+	entitlementName string,
+	roleId *v2.ResourceId,
+) (*v2.Grant, error) {
 	var grantOpts []grant.GrantOption
 	// TODO: review this grant Expandable operation
 	grantOpts = append(grantOpts, grant.WithAnnotation(&v2.GrantExpandable{
