@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -112,6 +114,19 @@ func (usr *containerBuilder) Entitlements(_ context.Context, resource *v2.Resour
 		),
 	}
 
+	for _, action := range rolemapper.ContainerPermissions.Actions() {
+		ent := entitlement.NewPermissionEntitlement(
+			resource,
+			action,
+			entitlement.WithDisplayName(fmt.Sprintf("Can %s %s", action, resource.DisplayName)),
+			entitlement.WithDescription(fmt.Sprintf("Can %s %s", action, resource.DisplayName)),
+			entitlement.WithGrantableTo(roleResourceType),
+			entitlement.WithAnnotation(&v2.EntitlementImmutable{}),
+		)
+
+		rv = append(rv, ent)
+	}
+
 	return rv, "", nil, nil
 }
 
@@ -121,37 +136,99 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 		return nil, "", nil, fmt.Errorf("container resource must have a parent resource from type %s", storageAccountResourceType.Id)
 	}
 
+	// RoleDefinitionsIds
+	bag := pagination.GenBag[string]{}
+
+	err := bag.Unmarshal(pToken.Token)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
 	parsedParentId, err := newStorageResourceSplitIdDataFromConnectorId(resource.ParentResourceId.Resource)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	idSplit := strings.Split(resource.Id.Resource, ":")
-	if len(idSplit) != 2 {
-		return nil, "", nil, fmt.Errorf("invalid resource id: %s", resource.Id.Resource)
+	if bag.Current() == nil {
+		idSplit := strings.Split(resource.Id.Resource, ":")
+		if len(idSplit) != 2 {
+			return nil, "", nil, fmt.Errorf("invalid resource id: %s", resource.Id.Resource)
+		}
+
+		containerName := idSplit[1]
+
+		scope := fmt.Sprintf("%s/blobServices/default/containers/%s", parsedParentId.AzureId(), containerName)
+		assignments, err := usr.client.GetRoleAssignments(ctx, parsedParentId.subscriptionID, scope)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		grants, err := ConvertErr(assignments, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
+			bag.Push(StringValue(in.Properties.RoleDefinitionID))
+
+			return grantFromRoleAssigment(
+				resource,
+				"assignment",
+				parsedParentId.subscriptionID,
+				in,
+			)
+		})
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		nextToken, err := bag.Marshal()
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		return grants, nextToken, nil, nil
 	}
 
-	containerName := idSplit[1]
+	state := bag.Pop()
 
-	scope := fmt.Sprintf("%s/blobServices/default/containers/%s", parsedParentId.AzureId(), containerName)
-	assignments, err := usr.client.GetRoleAssignments(ctx, parsedParentId.subscriptionID, scope)
+	roleDefinitionId := StringValue(state)
+	roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
+
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	grants, err := ConvertErr(assignments, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
-		return grantFromRoleAssigment(
-			resource,
-			"assignment",
-			parsedParentId.subscriptionID,
-			in,
+	actions, err := rolemapper.StorageAccountPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	var grants []*v2.Grant
+	for _, action := range actions {
+		plainRoleId, err := roleIdFromRoleDefinitionId(roleDefinitionId)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		roleResourceId, err := rs.NewResourceID(
+			roleResourceType,
+			fmt.Sprintf("%s:%s", plainRoleId, parsedParentId.subscriptionID),
 		)
-	})
+
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		newGrant, err := grantFromRole(resource, action, roleResourceId)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		grants = append(grants, newGrant)
+	}
+
+	nextToken, err := bag.Marshal()
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	return grants, "", nil, nil
+	return grants, nextToken, nil, nil
 }
 
 func newContainerBuilder(conn *Connector) *containerBuilder {

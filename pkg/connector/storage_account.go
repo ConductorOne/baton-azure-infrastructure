@@ -15,8 +15,7 @@ import (
 )
 
 type storageAccountBuilder struct {
-	conn      *Connector
-	cacheRole *GenericCache[armauthorization.RoleDefinitionsClientGetByIDResponse]
+	conn *Connector
 }
 
 func (usr *storageAccountBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -160,9 +159,7 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 	state := bag.Pop()
 
 	roleDefinitionId := StringValue(state)
-	roleDefinition, err := usr.cacheRole.GetOrSet(roleDefinitionId, func() (armauthorization.RoleDefinitionsClientGetByIDResponse, error) {
-		return usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
-	})
+	roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
 
 	if err != nil {
 		return nil, "", nil, err
@@ -207,7 +204,6 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 
 func newStorageAccountBuilder(conn *Connector) *storageAccountBuilder {
 	return &storageAccountBuilder{
-		conn:      conn,
-		cacheRole: NewGenericCache[armauthorization.RoleDefinitionsClientGetByIDResponse](),
+		conn: conn,
 	}
 }
