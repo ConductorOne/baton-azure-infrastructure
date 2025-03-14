@@ -189,12 +189,11 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 
 	roleDefinitionId := StringValue(state)
 	roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
-
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	actions, err := rolemapper.StorageAccountPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
+	actions, err := rolemapper.ContainerPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
 	if err != nil {
 		return nil, "", nil, err
 	}
