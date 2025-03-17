@@ -442,13 +442,28 @@ func (o *enterpriseApplicationsBuilder) Revoke(ctx context.Context, grant *v2.Gr
 	resourceID := grant.Entitlement.Resource.Id.Resource
 	switch eaEntId.Type {
 	case ownersStr:
-
 		err := o.client.ServicePrincipalDeleteOwner(ctx, resourceID, grant.Principal.Id.Resource)
 		if err != nil {
 			return nil, err
 		}
 	case assignmentStr:
-		err := o.client.ServicePrincipalDeleteAppRoleAssignedTo(ctx, resourceID, grant.Id)
+		servicePrincipal, err := o.client.ServicePrincipal(ctx, resourceID)
+		if err != nil {
+			return nil, err
+		}
+
+		var roleAssignment *client.AppRoleAssignment
+		for _, assignment := range servicePrincipal.AppRolesAssignedTo {
+			if assignment.AppRoleId == grant.Principal.Id.Resource {
+				roleAssignment = assignment
+			}
+		}
+
+		if roleAssignment == nil {
+			return nil, fmt.Errorf("baton-azure-infrastructure: app role assignment not found for role id %s", grant.Principal.Id.Resource)
+		}
+
+		err = o.client.ServicePrincipalDeleteAppRoleAssignedTo(ctx, resourceID, roleAssignment.Id)
 		if err != nil {
 			return nil, err
 		}

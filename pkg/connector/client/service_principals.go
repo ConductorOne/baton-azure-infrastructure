@@ -142,7 +142,7 @@ func (a *AzureClient) ServicePrincipalDeleteAppRoleAssignedTo(ctx context.Contex
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodDelete, url, nil, nil)
 	if err != nil {
-		return fmt.Errorf("baton-azure-infrastrucure: failed to delete owner from service principal: %w", err)
+		return fmt.Errorf("baton-azure-infrastrucure: failed to delete app role assgined: %w", err)
 	}
 
 	return nil
