@@ -380,9 +380,9 @@ func (id *enterpriseApplicationsEntitlementId) UnmarshalString(input string) err
 	if len(parts) < 3 {
 		return errors.New("baton-azure-infrastructure: invalid entitlement id")
 	}
-	id.Type = parts[1]
+	id.Type = parts[2]
 	if id.Type == assignmentStr {
-		if len(parts) < 3 {
+		if len(parts) < 4 {
 			return errors.New("baton-azure-infrastructure: invalid entitlement id: missing approle id")
 		}
 		id.AppRoleId = parts[3]
@@ -426,7 +426,7 @@ func (o *enterpriseApplicationsBuilder) Grant(ctx context.Context, principal *v2
 			return nil, err
 		}
 	default:
-		return nil, errors.New("baton-microsoft-entra: only can provision app roles or owners entitlements to an enterprise application")
+		return nil, fmt.Errorf("baton-microsoft-entra: only can provision app roles or owners entitlements to an enterprise application, got %s", eaEntId.Type)
 	}
 
 	return nil, nil
@@ -454,7 +454,7 @@ func (o *enterpriseApplicationsBuilder) Revoke(ctx context.Context, grant *v2.Gr
 
 		var roleAssignment *client.AppRoleAssignment
 		for _, assignment := range servicePrincipal.AppRolesAssignedTo {
-			if assignment.AppRoleId == grant.Principal.Id.Resource {
+			if assignment.AppRoleId == eaEntId.AppRoleId {
 				roleAssignment = assignment
 			}
 		}
