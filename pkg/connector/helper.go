@@ -1,54 +1,60 @@
 package connector
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/mail"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
-	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
-	armsubscription "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
-	"github.com/conductorone/baton-azure-infrastructure/pkg/internal/slices"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	pagination "github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	expSlices "golang.org/x/exp/slices"
 )
 
+// https://learn.microsoft.com/en-us/graph/api/resources/approleassignment?view=graph-rest-1.0
+//
+//	 	The identifier (id) for the app role which is assigned to the principal. This app role must be
+//			exposed in the appRoles property on the resource application's service principal (resourceId).
+//			If the resource application has not declared any app roles, a default app role ID of
+//			00000000-0000-0000-0000-000000000000 can be specified to signal that the principal is assigned
+//			to the resource app without any specific app roles. Required on create
+var defaultAppRoleAssignmentID string = "00000000-0000-0000-0000-000000000000"
+
 const (
 	managerIDProfileKey          = "managerId"
-	employeeNumberProfileKey     = "employeeNumber"
 	managerEmailProfileKey       = "managerEmail"
 	supervisorIDProfileKey       = "supervisorEId"
 	supervisorEmailProfileKey    = "supervisorEmail"
 	supervisorFullNameProfileKey = "supervisor"
 )
 
-var graphReadScopes = []string{
-	"https://graph.microsoft.com/.default",
-}
-
 // Create a new connector resource for an Entra User.
-func userResource(ctx context.Context, u *user, parentResourceID *v2.ResourceId, userTraitOptions ...rs.UserTraitOption) (*v2.Resource, error) {
+func userResource(ctx context.Context, u *client.User, parentResourceID *v2.ResourceId, userTraitOptions ...rs.UserTraitOption) (*v2.Resource, error) {
 	primaryEmail := fetchEmailAddresses(u.Email, u.UserPrincipalName)
-	profile := make(map[string]interface{})
-	profile["id"] = u.ID
-	profile["mail"] = primaryEmail
-	profile["displayName"] = u.DisplayName
-	profile["title"] = u.JobTitle
-	profile["jobTitle"] = u.JobTitle
-	profile["userPrincipalName"] = u.UserPrincipalName
-	profile["accountEnabled"] = u.AccountEnabled
-	profile["employeeId"] = u.EmployeeID
-	profile[employeeNumberProfileKey] = u.EmployeeID
-	profile["department"] = u.Department
+	profile := map[string]interface{}{
+		"id":                u.ID,
+		"email":             primaryEmail,
+		"displayName":       u.DisplayName,
+		"title":             u.JobTitle,
+		"jobTitle":          u.JobTitle,
+		"userPrincipalName": u.UserPrincipalName,
+		"accountEnabled":    u.AccountEnabled,
+		"employeeId":        u.EmployeeID,
+		// TODO: why are we setting employeeId twice?
+		"employeeNumber": u.EmployeeID,
+		"department":     u.Department,
+	}
+
 	if u.Manager != nil {
 		profile[managerIDProfileKey] = u.Manager.Id
 		profile[managerEmailProfileKey] = u.Manager.Email
@@ -90,7 +96,7 @@ func userResource(ctx context.Context, u *user, parentResourceID *v2.ResourceId,
 	return ret, nil
 }
 
-func userURL(u *user) string {
+func userURL(u *client.User) string {
 	return (&url.URL{
 		Scheme:   "https",
 		Host:     "entra.microsoft.com",
@@ -131,35 +137,7 @@ func fetchEmailAddresses(email string, upn string) string {
 	return primaryEmail
 }
 
-func setUserKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join([]string{
-		"id",
-		"displayName",
-		"mail",
-		"userPrincipalName",
-		"jobTitle",
-		"manager",
-		"accountEnabled",
-		"employeeType",
-		"employeeHireDate",
-		"employeeId",
-		"department",
-	}, ","))
-	v.Set("$expand", "manager($select=id,employeeId,mail,displayName)")
-	v.Set("$top", "999")
-	return v
-}
-
-func setUserResponseKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join([]string{
-		"userPurpose",
-	}, ","))
-	return v
-}
-
-func groupResource(ctx context.Context, g *group, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func groupResource(ctx context.Context, g *client.Group, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"object_id":           g.ID,
 		"group_type":          groupTypeValue(g),
@@ -206,7 +184,7 @@ func IsEmpty(field string) bool {
 	return field == ""
 }
 
-func groupURL(g *group) string {
+func groupURL(g *client.Group) string {
 	return (&url.URL{
 		Scheme:   "https",
 		Host:     "entra.microsoft.com",
@@ -215,8 +193,8 @@ func groupURL(g *group) string {
 	}).String()
 }
 
-func groupTypeValue(g *group) string {
-	if expSlices.Contains(g.GroupTypes, "Unified") {
+func groupTypeValue(g *client.Group) string {
+	if slices.Contains(g.GroupTypes, "Unified") {
 		return "microsoft_365"
 	}
 
@@ -235,45 +213,12 @@ func groupTypeValue(g *group) string {
 	return ""
 }
 
-func membershipTypeValue(g *group) string {
-	if expSlices.Contains(g.GroupTypes, "DynamicMembership") {
+func membershipTypeValue(g *client.Group) string {
+	if slices.Contains(g.GroupTypes, "DynamicMembership") {
 		return "dynamic"
 	}
 
 	return "assigned"
-}
-
-func setGroupKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join([]string{
-		"classification",
-		"description",
-		"displayName",
-		"groupTypes",
-		"id",
-		"mail",
-		"mailEnabled",
-		"onPremisesSecurityIdentifier",
-		"onPremisesSyncEnabled",
-		"securityEnabled",
-		"securityIdentifier",
-		"isAssignableToRole",
-		"isManagementRestricted",
-		"createdDateTime",
-	}, ","))
-	v.Set("$top", "999")
-	return v
-}
-
-func setMemberQuery() url.Values {
-	memberQuery := url.Values{}
-	memberQuery.Set("$select", strings.Join([]string{
-		"id",
-		"servicePrincipalType",
-		"onPremisesSyncEnabled",
-	}, ","))
-	memberQuery.Set("$top", "999")
-	return memberQuery
 }
 
 func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, permission string) string {
@@ -287,8 +232,8 @@ func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, per
 	)
 }
 
-func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Resource, g *groupBuilder, ps *pagination.PageState) ([]*v2.Grant, error) {
-	grants, err := slices.ConvertErr(resp.Members, func(gm *membership) (*v2.Grant, error) {
+func getGroupGrants(ctx context.Context, resp *client.MembershipList, resource *v2.Resource, ps *pagination.PageState) ([]*v2.Grant, error) {
+	grants, err := ConvertErr(resp.Members, func(gm *client.Membership) (*v2.Grant, error) {
 		var annos annotations.Annotations
 		objectID := resource.Id.GetResource()
 		rid := &v2.ResourceId{Resource: gm.Id}
@@ -330,14 +275,6 @@ func getGroupGrants(ctx context.Context, resp *membershipList, resource *v2.Reso
 	})
 
 	return grants, err
-}
-
-func (a *assignment) MarshalToReader() (*bytes.Reader, error) {
-	data, err := json.Marshal(a)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(data), nil
 }
 
 func getGroupGrantURL(principal *v2.Resource) string {
@@ -399,7 +336,7 @@ func tenantResource(ctx context.Context, t *armsubscription.TenantIDDescription)
 }
 
 func getResourceGroupID(name, subscriptionID, roleID string) string {
-	return (name + ":" + subscriptionID + ":" + roleID)
+	return name + ":" + subscriptionID + ":" + roleID
 }
 
 // https://learn.microsoft.com/es-es/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
@@ -528,12 +465,14 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 	var (
 		principalData map[string]interface{}
 		mapEndPoint   = []string{"directoryObjects", "users", "groups", "servicePrincipals"}
-		index         = 0
 	)
-	for index < len(mapEndPoint) {
-		reqURL := cn.buildURL(fmt.Sprintf("%s/%s", mapEndPoint[index], principalID), nil)
-		resp := &principalData
-		err := cn.query(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
+
+	for _, endpoint := range mapEndPoint {
+		builderUrl := cn.client.QueryBuilder().
+			Version(client.V1).
+			BuildUrl(endpoint, principalID)
+
+		err := cn.client.FromPath(ctx, builderUrl, &principalData)
 		if err != nil {
 			return "", err
 		}
@@ -549,14 +488,12 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 				return principalType, nil
 			}
 		}
-
-		index++
 	}
 
 	return "", nil
 }
 
-func managedIdentityResource(ctx context.Context, sp *servicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func managedIdentityResource(ctx context.Context, sp *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := make(map[string]interface{})
 	profile["id"] = sp.ID
 	profile["app_id"] = sp.AppId
@@ -577,13 +514,13 @@ func managedIdentityResource(ctx context.Context, sp *servicePrincipal, parentRe
 		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
 	}
 	ret, err := rs.NewUserResource(
-		sp.getDisplayName(),
+		sp.GetDisplayName(),
 		managedIdentitylResourceType,
 		sp.ID,
 		options,
 		rs.WithParentResourceID(parentResourceID),
 		rs.WithAnnotation(&v2.ExternalLink{
-			Url: sp.externalURL(),
+			Url: sp.ExternalURL(),
 		}),
 	)
 	if err != nil {
@@ -593,23 +530,7 @@ func managedIdentityResource(ctx context.Context, sp *servicePrincipal, parentRe
 	return ret, nil
 }
 
-func setManagedIdentityKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join(servicePrincipalSelect, ","))
-	v.Set("$filter", "servicePrincipalType eq 'ManagedIdentity'")
-	v.Set("$top", "999")
-	return v
-}
-
-func setEnterpriseApplicationsKeys() url.Values {
-	v := url.Values{}
-	v.Set("$select", strings.Join(servicePrincipalSelect, ","))
-	v.Set("$filter", "servicePrincipalType eq 'Application' AND accountEnabled eq true")
-	v.Set("$top", "999")
-	return v
-}
-
-func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func enterpriseApplicationResource(ctx context.Context, app *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := make(map[string]interface{})
 	profile["id"] = app.ID
 	profile["app_id"] = app.AppId
@@ -640,13 +561,13 @@ func enterpriseApplicationResource(ctx context.Context, app *servicePrincipal, p
 	// }
 
 	ret, err := rs.NewAppResource(
-		app.getDisplayName(),
+		app.GetDisplayName(),
 		enterpriseApplicationResourceType,
 		app.ID,
 		options,
 		rs.WithParentResourceID(parentResourceID),
 		rs.WithAnnotation(&v2.ExternalLink{
-			Url: app.externalURL(),
+			Url: app.ExternalURL(),
 		}),
 	)
 	if err != nil {
@@ -719,12 +640,12 @@ func getResourceGroups(ctx context.Context, conn *Connector) ([]string, error) {
 		}
 
 		for _, subscription := range page.Value {
-			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, conn.token, nil)
+			resourceGroupsClient, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, conn.token, nil)
 			if err != nil {
 				return nil, err
 			}
 
-			for pager := client.NewListPager(nil); pager.More(); {
+			for pager := resourceGroupsClient.NewListPager(nil); pager.More(); {
 				page, err := pager.NextPage(ctx)
 				if err != nil {
 					return nil, err
@@ -756,10 +677,7 @@ func getAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID
 		}
 
 		for _, assignment := range page.Value {
-			roleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
-				subscriptionID,
-				roleId,
-			)
+			roleDefinitionID := subscriptionRoleId(subscriptionID, roleId)
 			if *assignment.Properties.PrincipalID == principalID &&
 				*assignment.Properties.RoleDefinitionID == roleDefinitionID {
 				return *assignment.Name, nil
@@ -768,4 +686,12 @@ func getAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID
 	}
 
 	return "", fmt.Errorf("role assignment not found")
+}
+
+func subscriptionRoleId(subscriptionID, roleID string) string {
+	return fmt.Sprintf(
+		"/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s",
+		subscriptionID,
+		roleID,
+	)
 }
