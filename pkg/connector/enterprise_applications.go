@@ -264,7 +264,14 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 		if err != nil {
 			return nil, "", nil, err
 		}
-		return grants, "", nil, err
+
+		b.Pop()
+		nextToken, err := b.Marshal()
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		return grants, nextToken, nil, err
 	case ownersStr:
 		resp, err := e.client.ServicePrincipalOwners(ctx, principalId)
 		if err != nil {
@@ -278,11 +285,6 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 				return nil, "", nil, nil
 			}
 
-			return nil, "", nil, err
-		}
-
-		pageToken, err := b.NextToken(resp.NextLink)
-		if err != nil {
 			return nil, "", nil, err
 		}
 
@@ -314,17 +316,17 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 				return nil, fmt.Errorf("unknown membership type %+v for application owner (id=%s)", gm, objectID)
 			}
 
-			ur := &v2.Resource{Id: rid}
-			return &v2.Grant{
-				Id: gm.Id,
-				Entitlement: &v2.Entitlement{
-					Id:       fmt.Sprintf("enterprise_application:%s:owners", resource.Id.Resource),
-					Resource: resource,
-				},
-				Principal: ur,
-			}, nil
+			return grant.NewGrant(
+				resource,
+				"owners",
+				rid,
+			), nil
 		})
+		if err != nil {
+			return nil, "", nil, err
+		}
 
+		pageToken, err := b.NextToken(resp.NextLink)
 		if err != nil {
 			return nil, "", nil, err
 		}
