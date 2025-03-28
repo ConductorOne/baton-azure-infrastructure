@@ -9,6 +9,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/conductorone/baton-sdk/pkg/types/grant"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
+
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
@@ -306,6 +310,7 @@ func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) 
 		rs.WithAnnotation(
 			&v2.ChildResourceType{ResourceTypeId: resourceGroupResourceType.Id},
 			&v2.ChildResourceType{ResourceTypeId: roleResourceType.Id},
+			&v2.ChildResourceType{ResourceTypeId: storageAccountResourceType.Id},
 		))
 }
 
@@ -423,14 +428,36 @@ func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, pa
 		strRoleID string
 		opts      []rs.ResourceOption
 	)
+
+	var permissionsActions []any
+	var permissionsNotActions []any
+	for _, permission := range role.Properties.Permissions {
+		for _, action := range permission.Actions {
+			permissionsActions = append(permissionsActions, *action)
+		}
+
+		for _, action := range permission.NotActions {
+			permissionsNotActions = append(permissionsNotActions, *action)
+		}
+	}
+
+	var assignedScopes []any
+	for _, scope := range role.Properties.AssignableScopes {
+		assignedScopes = append(assignedScopes, *scope)
+	}
+
 	strRoleID = getRoleId(role.ID) // roleID + subscriptionID
 	profile := map[string]interface{}{
-		"id":                 strRoleID,
-		"name":               StringValue(role.Properties.RoleName),
-		"description":        StringValue(role.Properties.Description),
-		"type":               StringValue(role.Properties.RoleType),
-		"role-definition-id": StringValue(role.ID),
+		"id":                      strRoleID,
+		"name":                    StringValue(role.Properties.RoleName),
+		"description":             StringValue(role.Properties.Description),
+		"type":                    StringValue(role.Properties.RoleType),
+		"role_definition_id":      StringValue(role.ID),
+		"permissions_actions":     permissionsActions,
+		"permissions_not_actions": permissionsNotActions,
+		"assigned_scopes":         assignedScopes,
 	}
+
 	roleTraitOptions := []rs.RoleTraitOption{
 		rs.WithRoleProfile(profile),
 	}
@@ -580,7 +607,10 @@ func enterpriseApplicationResource(ctx context.Context, app *client.ServicePrinc
 func getAllRoles(ctx context.Context, conn *Connector, subscriptionID string) ([]string, error) {
 	lstRoles := []string{}
 	// Initialize the RoleDefinitionsClient
-	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(conn.token, nil)
+	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(
+		conn.token,
+		conn.client.ArmOptions(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -640,7 +670,11 @@ func getResourceGroups(ctx context.Context, conn *Connector) ([]string, error) {
 		}
 
 		for _, subscription := range page.Value {
-			resourceGroupsClient, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, conn.token, nil)
+			resourceGroupsClient, err := armresources.NewResourceGroupsClient(
+				*subscription.SubscriptionID,
+				conn.token,
+				conn.client.ArmOptions(),
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -663,7 +697,7 @@ func getResourceGroups(ctx context.Context, conn *Connector) ([]string, error) {
 
 func getAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID, roleId, principalID string) (string, error) {
 	// Create a Role Assignments Client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, conn.token, conn.client.ArmOptions())
 	if err != nil {
 		return "", err
 	}
@@ -694,4 +728,186 @@ func subscriptionRoleId(subscriptionID, roleID string) string {
 		subscriptionID,
 		roleID,
 	)
+}
+
+type storageResourceSplitIdData struct {
+	subscriptionID            string
+	resourceGroupName         string
+	resourceProviderNamespace string
+	resourceType              string
+	resourceName              string
+}
+
+func newStorageResourceSplitIdDataFromConnectorId(connectorId string) (*storageResourceSplitIdData, error) {
+	splitValue := strings.Split(connectorId, ":")
+
+	if len(splitValue) != 5 {
+		return nil, fmt.Errorf("invalid storage resource split id")
+	}
+
+	return &storageResourceSplitIdData{
+		subscriptionID:            splitValue[0],
+		resourceGroupName:         splitValue[1],
+		resourceProviderNamespace: splitValue[2],
+		resourceType:              splitValue[3],
+		resourceName:              splitValue[4],
+	}, nil
+}
+
+func (s *storageResourceSplitIdData) ConnectorId() string {
+	return fmt.Sprintf(
+		"%s:%s:%s:%s:%s",
+		s.subscriptionID,
+		s.resourceGroupName,
+		s.resourceProviderNamespace,
+		s.resourceType,
+		s.resourceName,
+	)
+}
+
+func (s *storageResourceSplitIdData) AzureId() string {
+	return fmt.Sprintf(
+		"/subscriptions/%s/resourceGroups/%s/providers/%s/%s/%s",
+		s.subscriptionID,
+		s.resourceGroupName,
+		s.resourceProviderNamespace,
+		s.resourceType,
+		s.resourceName,
+	)
+}
+
+func newStorageResourceSplitIdDataFromAzureId(id string) (*storageResourceSplitIdData, error) {
+	splits := strings.Split(id, "/")
+	// By docs the value should be
+	// Ex - /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/{resourceProviderNamespace}/{resourceType}/{resourceName}
+	if len(splits) != 9 {
+		return nil, fmt.Errorf(
+			"unexpected number of splits, ex: '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/{resourceProviderNamespace}/{resourceType}/{resourceName}', got %s",
+			id,
+		)
+	}
+
+	return &storageResourceSplitIdData{
+		subscriptionID:            splits[2],
+		resourceGroupName:         splits[4],
+		resourceProviderNamespace: splits[6],
+		resourceType:              splits[7],
+		resourceName:              splits[8],
+	}, nil
+}
+
+func storageAccountResource(ctx context.Context, account *armstorage.Account, parent *v2.ResourceId) (*v2.Resource, error) {
+	idData, err := newStorageResourceSplitIdDataFromAzureId(StringValue(account.ID))
+	if err != nil {
+		return nil, err
+	}
+
+	profile := map[string]interface{}{
+		"id":                  StringValue(account.ID),
+		"name":                StringValue(account.Name),
+		"location":            StringValue(account.Location),
+		"type":                StringValue(account.Type),
+		"resource_group_name": idData.resourceGroupName,
+	}
+
+	if account.Kind != nil {
+		profile["kind"] = string(*account.Kind)
+	}
+
+	if account.SKU != nil {
+		if account.SKU.Name != nil {
+			profile["sku_name"] = string(*account.SKU.Name)
+		}
+
+		if account.SKU.Tier != nil {
+			profile["sku_tier"] = string(*account.SKU.Tier)
+		}
+	}
+
+	if account.Identity != nil {
+		if account.Identity.Type != nil {
+			profile["identity_type"] = string(*account.Identity.Type)
+		}
+
+		if account.Identity.PrincipalID != nil {
+			profile["identity_principal_id"] = StringValue(account.Identity.PrincipalID)
+		}
+
+		if account.Identity.TenantID != nil {
+			profile["identity_tenant_id"] = StringValue(account.Identity.TenantID)
+		}
+	}
+
+	appTraits := []rs.AppTraitOption{
+		rs.WithAppProfile(profile),
+	}
+
+	return rs.NewResource(
+		StringValue(account.Name),
+		storageAccountResourceType,
+		idData.ConnectorId(),
+		rs.WithAppTrait(appTraits...),
+		rs.WithParentResourceID(parent),
+		rs.WithAnnotation(
+			&v2.ChildResourceType{ResourceTypeId: containerResourceType.Id},
+		),
+	)
+}
+
+func roleIdFromRoleDefinitionId(roleDefinitionId string) (string, error) {
+	splitValues := strings.Split(roleDefinitionId, "/")
+	if len(splitValues) != 7 {
+		return "", fmt.Errorf("invalid role definition id %s", roleDefinitionId)
+	}
+	return splitValues[len(splitValues)-1], nil
+}
+
+func grantFromRoleAssigment(
+	resource *v2.Resource,
+	entitlementName string,
+	subscriptionID string,
+	in *armauthorization.RoleAssignment,
+) (*v2.Grant, error) {
+	if in.Properties.RoleDefinitionID == nil {
+		return nil, fmt.Errorf("role definition id is nil")
+	}
+
+	roleIdFromSplit, err := roleIdFromRoleDefinitionId(*in.Properties.RoleDefinitionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// roleID : subscriptionID
+	roleId, err := rs.NewResourceID(
+		roleResourceType,
+		fmt.Sprintf("%s:%s", roleIdFromSplit, subscriptionID),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return grantFromRole(resource, entitlementName, roleId)
+}
+
+func grantFromRole(
+	resource *v2.Resource,
+	entitlementName string,
+	roleId *v2.ResourceId,
+) (*v2.Grant, error) {
+	var grantOpts []grant.GrantOption
+	// TODO: review this grant Expandable operation
+	grantOpts = append(grantOpts, grant.WithAnnotation(&v2.GrantExpandable{
+		EntitlementIds: []string{
+			fmt.Sprintf("role:%s:owners", roleId.Resource),
+			fmt.Sprintf("role:%s:assigned", roleId.Resource),
+		},
+		Shallow: true,
+	}))
+
+	return grant.NewGrant(
+		resource,
+		entitlementName,
+		roleId,
+		grantOpts...,
+	), nil
 }

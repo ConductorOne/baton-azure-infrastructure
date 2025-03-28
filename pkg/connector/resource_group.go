@@ -25,7 +25,11 @@ func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.R
 	var rv []*v2.Resource
 	subscriptionID := parentResourceID.Resource
 
-	client, err := armresources.NewResourceGroupsClient(subscriptionID, rg.conn.token, nil)
+	client, err := armresources.NewResourceGroupsClient(
+		subscriptionID,
+		rg.conn.token,
+		rg.conn.client.ArmOptions(),
+	)
 	if err != nil {
 		return nil, "", nil, err
 	}

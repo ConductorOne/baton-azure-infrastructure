@@ -170,7 +170,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	principalID := principal.Id.Resource // Object ID of the user, group, or service principal
 
 	// Initialize the client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, r.conn.client.ArmOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	}
 
 	// Create a RoleAssignmentsClient
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, r.conn.client.ArmOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID s
 	start := time.Now()
 
 	// Create a Role Assignments Client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.conn.token, nil)
+	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.conn.token, r.conn.client.ArmOptions())
 	if err != nil {
 		return err
 	}

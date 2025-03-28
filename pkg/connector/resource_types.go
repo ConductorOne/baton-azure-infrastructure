@@ -61,4 +61,18 @@ var (
 		Description: "Role of Azure Infrastructure",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE},
 	}
+
+	storageAccountResourceType = &v2.ResourceType{
+		Id:          "storage_account",
+		DisplayName: "Storage Account",
+		Description: "Storage Account of Azure Infrastructure",
+		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_APP},
+	}
+
+	containerResourceType = &v2.ResourceType{
+		Id:          "container",
+		DisplayName: "Container",
+		Description: "Container from Storage Account of Azure Infrastructure",
+		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_APP},
+	}
 )

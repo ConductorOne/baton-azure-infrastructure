@@ -5,6 +5,11 @@ import (
 	"io"
 	"net/http"
 
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+
 	"github.com/sourcegraph/conc/iter"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
@@ -13,16 +18,11 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
-	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
-	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 )
 
 type Connector struct {
 	token                 azcore.TokenCredential
-	httpClient            *uhttp.BaseHttpClient
 	MailboxSettings       bool
 	SkipAdGroups          bool
 	organizationIDs       []string
@@ -43,6 +43,8 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newManagedIdentityBuilder(d),
 		newEnterpriseApplicationsBuilder(d),
 		newRoleBuilder(d),
+		newStorageAccountBuilder(d),
+		newContainerBuilder(d),
 	}
 	return syncers
 }
@@ -76,16 +78,6 @@ func NewConnectorFromToken(
 	graphDomain string,
 	skipUnusedRoles bool,
 ) (*Connector, error) {
-	baseClient, err := uhttp.NewBaseHttpClientWithContext(ctx, httpClient)
-	if err != nil {
-		return nil, err
-	}
-
-	clientFactory, err := armsubscription.NewClientFactory(token, nil)
-	if err != nil {
-		return nil, err
-	}
-
 	azureClient, err := client.NewAzureClient(ctx, httpClient, token, skipAdGroups, graphDomain)
 	if err != nil {
 		return nil, err
@@ -95,37 +87,32 @@ func NewConnectorFromToken(
 	if err != nil {
 		return nil, err
 	}
-
 	organizationIDs := iter.Map(organizations, func(t *client.Organization) string {
 		return t.ID
 	})
 
-	c := &Connector{
-		token:           token,
-		httpClient:      baseClient,
-		MailboxSettings: mailboxSettings,
-		SkipAdGroups:    skipAdGroups,
-		clientFactory:   clientFactory,
-		client:          azureClient,
-		organizationIDs: organizationIDs,
-		SkipUnusedRoles: skipUnusedRoles,
-	}
-
-	roleDefinitionsClient, err := c.getRoleDefinitionsClient()
+	clientFactory, err := armsubscription.NewClientFactory(token, azureClient.ArmOptions())
 	if err != nil {
 		return nil, err
 	}
-	c.roleDefinitionsClient = roleDefinitionsClient
+
+	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(token, azureClient.ArmOptions())
+	if err != nil {
+		return nil, err
+	}
+
+	c := &Connector{
+		token:                 token,
+		MailboxSettings:       mailboxSettings,
+		SkipAdGroups:          skipAdGroups,
+		clientFactory:         clientFactory,
+		client:                azureClient,
+		organizationIDs:       organizationIDs,
+		SkipUnusedRoles:       skipUnusedRoles,
+		roleDefinitionsClient: roleDefinitionsClient,
+	}
 
 	return c, nil
-}
-
-func (d *Connector) getRoleDefinitionsClient() (*armauthorization.RoleDefinitionsClient, error) {
-	roleDefinitionsClient, err := armauthorization.NewRoleDefinitionsClient(d.token, nil)
-	if err != nil {
-		return nil, err
-	}
-	return roleDefinitionsClient, nil
 }
 
 // New returns a new instance of the connector.
