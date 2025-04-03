@@ -1,13 +1,14 @@
 module github.com/conductorone/baton-azure-infrastructure
 
 go 1.23
+toolchain go1.24.1
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.17.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.8.2
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage v1.7.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.0
-	github.com/conductorone/baton-sdk v0.2.70
+	github.com/conductorone/baton-sdk v0.2.89
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.10.0
@@ -16,11 +17,19 @@ require (
 )
 
 require (
+	github.com/aws/aws-lambda-go v1.47.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/lambda v1.71.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.0.4 // indirect
+	github.com/conductorone/dpop v0.2.3 // indirect
+	github.com/conductorone/dpop/integrations/dpop_grpc v0.2.3 // indirect
+	github.com/conductorone/dpop/integrations/dpop_oauth2 v0.2.3 // indirect
+	github.com/go-jose/go-jose/v4 v4.0.5 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.0 // indirect
+	github.com/jellydator/ttlcache/v3 v3.3.0 // indirect
+	github.com/pquerna/cachecontrol v0.2.0 // indirect
+	github.com/pquerna/xjwt/xkeyset v0.0.0-20241217022915-10fc997b2a9f // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.34.0 // indirect
@@ -39,14 +48,14 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription v1.2.0
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.4.0 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.34.0 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.8 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.36.3 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.10 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.29.2 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.55 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.25 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.55 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.29 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.29 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.34 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.34 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.2 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.3.29 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.12.2 // indirect
@@ -106,15 +115,15 @@ require (
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/ratelimit v0.3.1 // indirect
-	golang.org/x/crypto v0.33.0 // indirect
-	golang.org/x/net v0.35.0 // indirect
-	golang.org/x/oauth2 v0.25.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250127172529-29210b9bc287 // indirect
-	google.golang.org/grpc v1.70.0
-	google.golang.org/protobuf v1.36.4 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/net v0.36.0 // indirect
+	golang.org/x/oauth2 v0.28.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250303144028-a0af3efb3deb // indirect
+	google.golang.org/grpc v1.71.0
+	google.golang.org/protobuf v1.36.5 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
