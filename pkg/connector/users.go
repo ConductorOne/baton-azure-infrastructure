@@ -5,6 +5,10 @@ import (
 	"strings"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -42,12 +46,16 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 	}
 
 	var userResources []*v2.Resource
+	l := ctxzap.Extract(ctx)
 
 	// GET https://graph.microsoft.com/beta/users/{userId}/mailboxSettings
 	for _, ur := range resp.Users {
 		mailboxSettingsResp, err := usr.client.UserMailboxSetting(ctx, ur.ID)
 		if err != nil {
-			// TODO: previous version was just log.Warn, should we return an error here?
+			if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+				l.Debug("UserMailboxSetting: user not found", zap.String("user_id", ur.ID), zap.Error(err))
+				continue
+			}
 			return nil, "", nil, err
 		}
 
