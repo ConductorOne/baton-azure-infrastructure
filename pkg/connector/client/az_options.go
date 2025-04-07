@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -14,8 +15,14 @@ type uhttpTransporterWrapper struct {
 	client *uhttp.BaseHttpClient
 }
 
+type uhttpErrorResponseWrapper map[string]interface{}
+
+func (u uhttpErrorResponseWrapper) Message() string {
+	return fmt.Sprintf("response map %v", u)
+}
+
 func (c *uhttpTransporterWrapper) Do(req *http.Request) (*http.Response, error) {
-	return c.client.Do(req)
+	return c.client.Do(req, uhttp.WithErrorResponse(&uhttpErrorResponseWrapper{}))
 }
 
 func (a *AzureClient) Options() azcore.ClientOptions {
