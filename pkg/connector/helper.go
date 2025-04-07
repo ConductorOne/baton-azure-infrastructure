@@ -3,13 +3,14 @@ package connector
 import (
 	"context"
 	"fmt"
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	"go.uber.org/zap"
 	"net/mail"
 	"net/url"
 	"path"
 	"slices"
 	"strings"
+
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 
@@ -854,7 +855,6 @@ func storageAccountResource(ctx context.Context, account *armstorage.Account, pa
 	// https://github.com/Azure/PSRule.Rules.Azure/pull/467/commits/56e6a72ff636a5f766658085dd529fed93e94073
 	if account.Kind != nil &&
 		*account.Kind != armstorage.KindFileStorage {
-
 		childAnnotation := rs.WithAnnotation(
 			&v2.ChildResourceType{ResourceTypeId: containerResourceType.Id},
 		)
