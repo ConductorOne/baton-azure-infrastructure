@@ -9,6 +9,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
+
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
@@ -797,6 +800,8 @@ func newStorageResourceSplitIdDataFromAzureId(id string) (*storageResourceSplitI
 }
 
 func storageAccountResource(ctx context.Context, account *armstorage.Account, parent *v2.ResourceId) (*v2.Resource, error) {
+	l := ctxzap.Extract(ctx)
+
 	idData, err := newStorageResourceSplitIdDataFromAzureId(StringValue(account.ID))
 	if err != nil {
 		return nil, err
@@ -842,15 +847,28 @@ func storageAccountResource(ctx context.Context, account *armstorage.Account, pa
 		rs.WithAppProfile(profile),
 	}
 
+	opts := []rs.ResourceOption{
+		rs.WithAppTrait(appTraits...),
+		rs.WithParentResourceID(parent),
+	}
+
+	// https://github.com/Azure/PSRule.Rules.Azure/pull/467/commits/56e6a72ff636a5f766658085dd529fed93e94073
+	if account.Kind != nil &&
+		*account.Kind != armstorage.KindFileStorage {
+		childAnnotation := rs.WithAnnotation(
+			&v2.ChildResourceType{ResourceTypeId: containerResourceType.Id},
+		)
+
+		opts = append(opts, childAnnotation)
+	} else {
+		l.Debug("skipping child resource type for file storage account", zap.String("account", StringValue(account.Name)))
+	}
+
 	return rs.NewResource(
 		StringValue(account.Name),
 		storageAccountResourceType,
 		idData.ConnectorId(),
-		rs.WithAppTrait(appTraits...),
-		rs.WithParentResourceID(parent),
-		rs.WithAnnotation(
-			&v2.ChildResourceType{ResourceTypeId: containerResourceType.Id},
-		),
+		opts...,
 	)
 }
 
