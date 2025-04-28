@@ -118,7 +118,7 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 		client, err := armauthorization.NewRoleAssignmentsClient(
 			storageResourceIDs.subscriptionID,
 			usr.conn.token,
-			nil,
+			usr.conn.client.ArmOptions(),
 		)
 		if err != nil {
 			return nil, "", nil, err
