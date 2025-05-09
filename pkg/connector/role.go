@@ -103,6 +103,13 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *
 	}
 	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeAssigned, options...))
 
+	options = []ent.EntitlementOption{
+		ent.WithDisplayName(fmt.Sprintf("%s Role Member", resource.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("Member of %s role", resource.DisplayName)),
+		ent.WithGrantableTo(userResourceType, groupResourceType),
+	}
+	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeAssigned, options...))
+
 	return rv, "", nil, nil
 }
 

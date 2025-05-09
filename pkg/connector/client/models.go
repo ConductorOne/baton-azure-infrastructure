@@ -3,7 +3,14 @@ package client
 import (
 	"fmt"
 	"net/url"
+	"time"
 )
+
+type GraphResponse[T any] struct {
+	Context  string `json:"@odata.context"`
+	NextLink string `json:"@odata.nextLink"`
+	Value    T
+}
 
 type Manager struct {
 	Id          string `json:"id,omitempty"`
@@ -152,4 +159,41 @@ func (sp *ServicePrincipal) ExternalURL() string {
 			sp.ServicePrincipalType,
 		),
 	}).String()
+}
+
+type PMIPrivilegedAccessResource struct {
+	Id                 string     `json:"id"`
+	ExternalId         string     `json:"externalId"`
+	Type               string     `json:"type"`
+	DisplayName        string     `json:"displayName"`
+	Status             string     `json:"status"`
+	OnboardDateTime    *time.Time `json:"onboardDateTime"`
+	RegisteredDateTime *time.Time `json:"registeredDateTime"`
+}
+
+type PMIRoleAssigment struct {
+	Id                         string    `json:"id"`
+	ResourceId                 string    `json:"resourceId"`
+	RoleDefinitionId           string    `json:"roleDefinitionId"`
+	SubjectId                  string    `json:"subjectId"`
+	StartDateTime              time.Time `json:"startDateTime"`
+	EndDateTime                time.Time `json:"endDateTime"`
+	MemberType                 string    `json:"memberType"`
+	AssignmentState            string    `json:"assignmentState"`
+	Status                     string    `json:"status"`
+	RoleDefinitionOdataContext string    `json:"roleDefinition@odata.context"`
+	RoleDefinition             struct {
+		Id          string `json:"id"`
+		ResourceId  string `json:"resourceId"`
+		ExternalId  string `json:"externalId"`
+		TemplateId  string `json:"templateId"`
+		DisplayName string `json:"displayName"`
+		Type        string `json:"type"`
+	} `json:"roleDefinition"`
+	SubjectOdataContext string `json:"subject@odata.context"`
+	Subject             struct {
+		Id          string `json:"id"`
+		Type        string `json:"type"`
+		DisplayName string `json:"displayName"`
+	} `json:"subject"`
 }
