@@ -233,10 +233,16 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 		if privilegedId == "" {
 			privilegedAccess, err := usr.conn.client.GetPrivilegedAccessFromAzure(ctx, storageResourceIDs.AzureId())
 			if err != nil {
-				if code, ok := status.FromError(err); ok && code.Code() == codes.NotFound {
+				if status.Code(err) == codes.NotFound {
 					l.Warn("Privileged access not found", zap.String("scope", storageResourceIDs.AzureId()))
 					return nil, "", nil, nil
 				}
+
+				if status.Code(err) == codes.PermissionDenied {
+					l.Error("Permission denied for get privileged access", zap.String("scope", storageResourceIDs.AzureId()))
+					return nil, "", nil, nil
+				}
+
 				return nil, "", nil, err
 			}
 
@@ -250,7 +256,7 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 		privilegedAssignments, nextLink, err := usr.conn.client.GetPrivilegedAccessRoleAssignments(ctx, privilegedId, state.NextLink)
 		if err != nil {
 			if status.Code(err) == codes.PermissionDenied {
-				l.Error("Permission denied", zap.String("scope", privilegedId))
+				l.Error("Permission denied for get privileged access roles", zap.String("scope", privilegedId))
 				return nil, "", nil, nil
 			}
 			return nil, "", nil, err
