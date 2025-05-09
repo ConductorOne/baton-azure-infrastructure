@@ -249,6 +249,10 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 
 		privilegedAssignments, nextLink, err := usr.conn.client.GetPrivilegedAccessRoleAssignments(ctx, privilegedId, state.NextLink)
 		if err != nil {
+			if status.Code(err) == codes.PermissionDenied {
+				l.Error("Permission denied", zap.String("scope", privilegedId))
+				return nil, "", nil, nil
+			}
 			return nil, "", nil, err
 		}
 
