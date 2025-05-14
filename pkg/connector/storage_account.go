@@ -4,6 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
@@ -13,6 +19,8 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 )
+
+var typeEligible = "eligible"
 
 type storageAccountBuilder struct {
 	conn *Connector
@@ -82,6 +90,14 @@ func (usr *storageAccountBuilder) Entitlements(_ context.Context, resource *v2.R
 		),
 	}
 
+	options := []entitlement.EntitlementOption{
+		entitlement.WithDisplayName(fmt.Sprintf("%s Eligible Member", resource.DisplayName)),
+		entitlement.WithDescription(fmt.Sprintf("Eligible for %s group", resource.DisplayName)),
+		entitlement.WithGrantableTo(userResourceType, groupResourceType),
+		entitlement.WithAnnotation(&v2.EntitlementImmutable{}),
+	}
+	rv = append(rv, entitlement.NewAssignmentEntitlement(resource, typeEligible, options...))
+
 	for _, value := range rolemapper.StorageAccountPermissions.Actions() {
 		ent := entitlement.NewPermissionEntitlement(
 			resource,
@@ -100,8 +116,16 @@ func (usr *storageAccountBuilder) Entitlements(_ context.Context, resource *v2.R
 
 // Grants always returns an empty slice for users since they don't have any entitlements.
 func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+	type bagState struct {
+		Value    string `json:"value"`
+		State    string `json:"state"`
+		NextLink string `json:"nextLink"`
+	}
+
+	l := ctxzap.Extract(ctx)
+
 	// Stores RoleDefinitionIds
-	bag := pagination.GenBag[string]{}
+	bag := pagination.GenBag[bagState]{}
 
 	err := bag.Unmarshal(pToken.Token)
 	if err != nil {
@@ -113,9 +137,13 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 		return nil, "", nil, err
 	}
 
-	// Init state
 	if bag.Current() == nil {
-		client, err := armauthorization.NewRoleAssignmentsClient(
+		bag.Push(bagState{
+			Value: "",
+			State: "ELIGIBLE",
+		})
+
+		roleClient, err := armauthorization.NewRoleAssignmentsClient(
 			storageResourceIDs.subscriptionID,
 			usr.conn.token,
 			usr.conn.client.ArmOptions(),
@@ -126,7 +154,7 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 
 		var grants []*v2.Grant
 
-		rolesAssignments := client.NewListForScopePager(storageResourceIDs.AzureId(), nil)
+		rolesAssignments := roleClient.NewListForScopePager(storageResourceIDs.AzureId(), nil)
 
 		for rolesAssignments.More() {
 			result, err := rolesAssignments.NextPage(ctx)
@@ -135,7 +163,10 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 			}
 
 			convertErr, err := ConvertErr(result.Value, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
-				bag.Push(StringValue(in.Properties.RoleDefinitionID))
+				bag.Push(bagState{
+					Value: StringValue(in.Properties.RoleDefinitionID),
+					State: "ASSIGNMENT",
+				})
 
 				return grantFromRoleAssigment(resource, "assignment", storageResourceIDs.subscriptionID, in)
 			})
@@ -158,40 +189,98 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 	// Get the current state
 	state := bag.Pop()
 
-	roleDefinitionId := StringValue(state)
-	roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
-
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	actions, err := rolemapper.StorageAccountPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
 	var grants []*v2.Grant
-	for _, action := range actions {
-		plainRoleId, err := roleIdFromRoleDefinitionId(roleDefinitionId)
-		if err != nil {
-			return nil, "", nil, err
-		}
 
-		roleResourceId, err := rs.NewResourceID(
-			roleResourceType,
-			fmt.Sprintf("%s:%s", plainRoleId, storageResourceIDs.subscriptionID),
-		)
+	switch state.State {
+	case "ASSIGNMENT":
+		roleDefinitionId := state.Value
+		roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
 
 		if err != nil {
 			return nil, "", nil, err
 		}
 
-		newGrant, err := grantFromRole(resource, action, roleResourceId)
+		actions, err := rolemapper.StorageAccountPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
 		if err != nil {
 			return nil, "", nil, err
 		}
 
-		grants = append(grants, newGrant)
+		for _, action := range actions {
+			plainRoleId, err := roleIdFromRoleDefinitionId(roleDefinitionId)
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			roleResourceId, err := rs.NewResourceID(
+				roleResourceType,
+				fmt.Sprintf("%s:%s", plainRoleId, storageResourceIDs.subscriptionID),
+			)
+
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			newGrant, err := grantFromRole(resource, action, roleResourceId)
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			grants = append(grants, newGrant)
+		}
+	case "ELIGIBLE":
+		privilegedId := state.Value
+
+		if privilegedId == "" {
+			privilegedAccess, err := usr.conn.client.GetPrivilegedAccessFromAzure(ctx, storageResourceIDs.AzureId())
+			if err != nil {
+				if status.Code(err) == codes.NotFound {
+					l.Warn("Privileged access not found", zap.String("scope", storageResourceIDs.AzureId()))
+					return nil, "", nil, nil
+				}
+
+				if status.Code(err) == codes.PermissionDenied {
+					l.Error("Permission denied for get privileged access", zap.String("scope", storageResourceIDs.AzureId()))
+					return nil, "", nil, nil
+				}
+
+				return nil, "", nil, err
+			}
+
+			if privilegedAccess == nil {
+				return nil, "", nil, fmt.Errorf("privileged access not found for scope %s", storageResourceIDs.AzureId())
+			}
+
+			privilegedId = privilegedAccess.Id
+		}
+
+		privilegedAssignments, nextLink, err := usr.conn.client.GetPrivilegedAccessRoleAssignments(ctx, privilegedId, state.NextLink)
+		if err != nil {
+			if status.Code(err) == codes.PermissionDenied {
+				l.Error("Permission denied for get privileged access roles", zap.String("scope", privilegedId))
+				return nil, "", nil, nil
+			}
+			return nil, "", nil, err
+		}
+
+		grantsResponse, err := ConvertErr(privilegedAssignments, func(in client.PMIRoleAssigment) (*v2.Grant, error) {
+			return grantFromEligibleAssignment(ctx, resource, in)
+		})
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		if nextLink != "" {
+			bag.Push(bagState{
+				Value:    privilegedId,
+				State:    "ELIGIBLE",
+				NextLink: nextLink,
+			})
+		}
+
+		grants = append(grants, grantsResponse...)
+
+	default:
+		return nil, "", nil, fmt.Errorf("unknown state: %s", state.State)
 	}
 
 	nextToken, err := bag.Marshal()

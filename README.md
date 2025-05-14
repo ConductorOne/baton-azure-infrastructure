@@ -23,6 +23,9 @@ Check out [Baton](https://github.com/conductorone/baton) to learn more the proje
         - ServicePrincipalEndpoint.Read.All
         - User.Read
         - User.Read.All
+        - PrivilegedAccess.Read.AzureAD
+        - PrivilegedAccess.Read.AzureADGroup
+        - PrivilegedAccess.Read.AzureResources
     - Needs to add the application as Reader in the Azure Subscription that you want to sync
 - Then you will need to get the `tenant_id` of your Azure AD tenant. You can find this in the Azure Entra ID Overview
   page [here](https://portal.azure.com/#blade/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/Overview).

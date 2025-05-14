@@ -929,3 +929,45 @@ func grantFromRole(
 		grantOpts...,
 	), nil
 }
+
+func grantFromEligibleAssignment(ctx context.Context, resource *v2.Resource, assigment client.PMIRoleAssigment) (*v2.Grant, error) {
+	l := ctxzap.Extract(ctx)
+
+	grantOpts := []grant.GrantOption{
+		grant.WithAnnotation(&v2.GrantImmutable{}),
+		grant.WithGrantMetadata(map[string]interface{}{
+			"displayName": assigment.RoleDefinition.DisplayName,
+		}),
+	}
+
+	var id *v2.ResourceId
+	switch assigment.Subject.Type {
+	case "User":
+		id = &v2.ResourceId{
+			Resource:     assigment.Subject.Id,
+			ResourceType: userResourceType.Id,
+		}
+	case "Group":
+		id = &v2.ResourceId{
+			Resource:     assigment.Subject.Id,
+			ResourceType: groupResourceType.Id,
+		}
+
+		grantOpts = append(grantOpts, grant.WithAnnotation(&v2.GrantExpandable{
+			EntitlementIds: []string{
+				fmt.Sprintf("group:%s:owners", assigment.Subject.Id),
+				fmt.Sprintf("group:%s:members", assigment.Subject.Id),
+			},
+		}))
+	default:
+		l.Error("unsupported principal type", zap.String("principalType", assigment.Subject.Type))
+		return nil, nil
+	}
+
+	return grant.NewGrant(
+		resource,
+		typeEligible,
+		id,
+		grantOpts...,
+	), nil
+}
