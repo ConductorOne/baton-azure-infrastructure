@@ -8,7 +8,6 @@ import (
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	"go.uber.org/zap"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 
@@ -142,7 +141,6 @@ func (usr *containerBuilder) getRoleDefinition(ctx context.Context, roleDefiniti
 
 	if ok {
 		l := ctxzap.Extract(ctx)
-		l.Debug("role definition cache hit", zap.String("roleDefinitionId", roleDefinitionId))
 		return roleDefinition, nil
 	}
 
