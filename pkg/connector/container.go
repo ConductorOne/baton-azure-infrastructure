@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
 
@@ -20,8 +21,10 @@ import (
 
 // containerBuilder syncs Container given an StorageAccount.
 type containerBuilder struct {
-	client *client.AzureClient
-	conn   *Connector
+	client         *client.AzureClient
+	conn           *Connector
+	roleCache      map[string]armauthorization.RoleDefinitionsClientGetByIDResponse
+	roleCacheMutex sync.RWMutex
 }
 
 func (usr *containerBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -130,6 +133,27 @@ func (usr *containerBuilder) Entitlements(_ context.Context, resource *v2.Resour
 	return rv, "", nil, nil
 }
 
+func (usr *containerBuilder) getRoleDefinition(ctx context.Context, roleDefinitionId string) (armauthorization.RoleDefinitionsClientGetByIDResponse, error) {
+	usr.roleCacheMutex.RLock()
+	roleDefinition, ok := usr.roleCache[roleDefinitionId]
+	usr.roleCacheMutex.RUnlock()
+
+	if ok {
+		return roleDefinition, nil
+	}
+
+	roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
+	if err != nil {
+		return armauthorization.RoleDefinitionsClientGetByIDResponse{}, fmt.Errorf("failed to get role definition: %w", err)
+	}
+
+	usr.roleCacheMutex.Lock()
+	usr.roleCache[roleDefinitionId] = roleDefinition
+	usr.roleCacheMutex.Unlock()
+
+	return roleDefinition, nil
+}
+
 // Grants always returns an empty slice for users since they don't have any entitlements.
 func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	if resource.ParentResourceId == nil || resource.ParentResourceId.ResourceType != storageAccountResourceType.Id {
@@ -188,7 +212,7 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 	state := bag.Pop()
 
 	roleDefinitionId := StringValue(state)
-	roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
+	roleDefinition, err := usr.getRoleDefinition(ctx, roleDefinitionId)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -232,7 +256,8 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 
 func newContainerBuilder(conn *Connector) *containerBuilder {
 	return &containerBuilder{
-		conn:   conn,
-		client: conn.client,
+		conn:      conn,
+		client:    conn.client,
+		roleCache: make(map[string]armauthorization.RoleDefinitionsClientGetByIDResponse),
 	}
 }

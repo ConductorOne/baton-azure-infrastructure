@@ -30,6 +30,7 @@ type Connector struct {
 	clientFactory         *armsubscription.ClientFactory
 	client                *client.AzureClient
 	SkipUnusedRoles       bool
+	SyncStorageContainers bool
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
@@ -44,8 +45,12 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newEnterpriseApplicationsBuilder(d),
 		newRoleBuilder(d),
 		newStorageAccountBuilder(d),
-		newContainerBuilder(d),
 	}
+
+	if d.SyncStorageContainers {
+		syncers = append(syncers, newContainerBuilder(d))
+	}
+
 	return syncers
 }
 
@@ -77,6 +82,7 @@ func NewConnectorFromToken(
 	skipAdGroups bool,
 	graphDomain string,
 	skipUnusedRoles bool,
+	syncStorageContainers bool,
 ) (*Connector, error) {
 	azureClient, err := client.NewAzureClient(ctx, httpClient, token, skipAdGroups, graphDomain)
 	if err != nil {
@@ -109,6 +115,7 @@ func NewConnectorFromToken(
 		client:                azureClient,
 		organizationIDs:       organizationIDs,
 		SkipUnusedRoles:       skipUnusedRoles,
+		SyncStorageContainers: syncStorageContainers,
 		roleDefinitionsClient: roleDefinitionsClient,
 	}
 
@@ -126,6 +133,7 @@ func New(
 	skipAdGroups bool,
 	graphDomain string,
 	skipUnusedRoles bool,
+	syncStorageContainers bool,
 ) (*Connector, error) {
 	var cred azcore.TokenCredential
 	httpClient, err := uhttp.NewClient(
@@ -170,5 +178,6 @@ func New(
 		skipAdGroups,
 		graphDomain,
 		skipUnusedRoles,
+		syncStorageContainers,
 	)
 }
