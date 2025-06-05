@@ -47,6 +47,7 @@ func getConnector(ctx context.Context, v *viper.Viper) (types.ConnectorServer, e
 	skipAdGroups := v.GetBool(skipAdGroups.FieldName)
 	graphDomain := v.GetString(graphDomain.FieldName)
 	skipUnusedRoles := v.GetBool(skipUnusedRoles.FieldName)
+	syncStorageContainers := v.GetBool(syncStorageContainers.FieldName)
 
 	cb, err := connector.New(
 		ctx,
@@ -58,6 +59,7 @@ func getConnector(ctx context.Context, v *viper.Viper) (types.ConnectorServer, e
 		skipAdGroups,
 		graphDomain,
 		skipUnusedRoles,
+		syncStorageContainers,
 	)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
