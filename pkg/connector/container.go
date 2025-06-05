@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 
@@ -140,7 +139,6 @@ func (usr *containerBuilder) getRoleDefinition(ctx context.Context, roleDefiniti
 	usr.roleCacheMutex.RUnlock()
 
 	if ok {
-		l := ctxzap.Extract(ctx)
 		return roleDefinition, nil
 	}
 
