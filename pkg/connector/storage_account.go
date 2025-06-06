@@ -64,7 +64,7 @@ func (usr *storageAccountBuilder) List(ctx context.Context, parentResourceID *v2
 		}
 
 		convertErr, err := ConvertErr(response.Value, func(account *armstorage.Account) (*v2.Resource, error) {
-			return storageAccountResource(ctx, account, parentResourceID, usr.conn.SyncStorageContainers)
+			return storageAccountResource(ctx, account, parentResourceID, usr.conn.skipStorageContainerSync)
 		})
 
 		if err != nil {
