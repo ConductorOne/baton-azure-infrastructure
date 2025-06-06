@@ -22,15 +22,15 @@ import (
 )
 
 type Connector struct {
-	token                 azcore.TokenCredential
-	MailboxSettings       bool
-	SkipAdGroups          bool
-	organizationIDs       []string
-	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
-	clientFactory         *armsubscription.ClientFactory
-	client                *client.AzureClient
-	SkipUnusedRoles       bool
-	SyncStorageContainers bool
+	token                    azcore.TokenCredential
+	MailboxSettings          bool
+	SkipAdGroups             bool
+	organizationIDs          []string
+	roleDefinitionsClient    *armauthorization.RoleDefinitionsClient
+	clientFactory            *armsubscription.ClientFactory
+	client                   *client.AzureClient
+	SkipUnusedRoles          bool
+	skipStorageContainerSync bool
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
@@ -47,7 +47,7 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newStorageAccountBuilder(d),
 	}
 
-	if d.SyncStorageContainers {
+	if !d.skipStorageContainerSync {
 		syncers = append(syncers, newContainerBuilder(d))
 	}
 
@@ -82,7 +82,7 @@ func NewConnectorFromToken(
 	skipAdGroups bool,
 	graphDomain string,
 	skipUnusedRoles bool,
-	syncStorageContainers bool,
+	skipStorageContainerSync bool,
 ) (*Connector, error) {
 	azureClient, err := client.NewAzureClient(ctx, httpClient, token, skipAdGroups, graphDomain)
 	if err != nil {
@@ -108,15 +108,15 @@ func NewConnectorFromToken(
 	}
 
 	c := &Connector{
-		token:                 token,
-		MailboxSettings:       mailboxSettings,
-		SkipAdGroups:          skipAdGroups,
-		clientFactory:         clientFactory,
-		client:                azureClient,
-		organizationIDs:       organizationIDs,
-		SkipUnusedRoles:       skipUnusedRoles,
-		SyncStorageContainers: syncStorageContainers,
-		roleDefinitionsClient: roleDefinitionsClient,
+		token:                    token,
+		MailboxSettings:          mailboxSettings,
+		SkipAdGroups:             skipAdGroups,
+		clientFactory:            clientFactory,
+		client:                   azureClient,
+		organizationIDs:          organizationIDs,
+		SkipUnusedRoles:          skipUnusedRoles,
+		skipStorageContainerSync: skipStorageContainerSync,
+		roleDefinitionsClient:    roleDefinitionsClient,
 	}
 
 	return c, nil
@@ -133,7 +133,7 @@ func New(
 	skipAdGroups bool,
 	graphDomain string,
 	skipUnusedRoles bool,
-	syncStorageContainers bool,
+	skipStorageContainerSync bool,
 ) (*Connector, error) {
 	var cred azcore.TokenCredential
 	httpClient, err := uhttp.NewClient(
@@ -178,6 +178,6 @@ func New(
 		skipAdGroups,
 		graphDomain,
 		skipUnusedRoles,
-		syncStorageContainers,
+		skipStorageContainerSync,
 	)
 }

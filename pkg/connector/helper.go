@@ -799,7 +799,7 @@ func newStorageResourceSplitIdDataFromAzureId(id string) (*storageResourceSplitI
 	}, nil
 }
 
-func storageAccountResource(ctx context.Context, account *armstorage.Account, parent *v2.ResourceId, syncContainers bool) (*v2.Resource, error) {
+func storageAccountResource(ctx context.Context, account *armstorage.Account, parent *v2.ResourceId, skipContainersSync bool) (*v2.Resource, error) {
 	l := ctxzap.Extract(ctx)
 
 	idData, err := newStorageResourceSplitIdDataFromAzureId(StringValue(account.ID))
@@ -853,7 +853,7 @@ func storageAccountResource(ctx context.Context, account *armstorage.Account, pa
 	}
 
 	// https://github.com/Azure/PSRule.Rules.Azure/pull/467/commits/56e6a72ff636a5f766658085dd529fed93e94073
-	if syncContainers && account.Kind != nil &&
+	if !skipContainersSync && account.Kind != nil &&
 		*account.Kind != armstorage.KindFileStorage {
 		childAnnotation := rs.WithAnnotation(
 			&v2.ChildResourceType{ResourceTypeId: containerResourceType.Id},

@@ -46,9 +46,9 @@ var (
 		field.WithDescription("Skip unused roles"),
 		field.WithDefaultValue(false),
 	)
-	syncStorageContainers = field.BoolField(
-		"sync-storage-containers",
-		field.WithDescription("If true, sync storage containers"),
+	skipStorageContainerSync = field.BoolField(
+		"skip-sync-storage-containers",
+		field.WithDescription("If true, storage containers is skipped"),
 		field.WithDefaultValue(false),
 	)
 )
@@ -62,7 +62,7 @@ var ConfigurationFields = []field.SchemaField{
 	skipAdGroups,
 	graphDomain,
 	skipUnusedRoles,
-	syncStorageContainers,
+	skipStorageContainerSync,
 }
 
 var FieldRelationships = []field.SchemaFieldRelationship{
