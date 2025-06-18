@@ -10,6 +10,32 @@ type GraphResponse[T any] struct {
 	Context  string `json:"@odata.context"`
 	NextLink string `json:"@odata.nextLink"`
 	Value    T
+	Error    *GraphError `json:"error,omitempty"`
+}
+
+func (r *GraphResponse[any]) Message() string {
+	if r.Error != nil {
+		return r.Error.Error()
+	}
+	return ""
+}
+
+type GraphError struct {
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	InnerError *struct {
+		Code      string `json:"code"`
+		RequestID string `json:"request-id"`
+		Date      string `json:"date"`
+	} `json:"innerError,omitempty"`
+	Details []struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"details,omitempty"`
+}
+
+func (e *GraphError) Error() string {
+	return fmt.Sprintf("code: %s, message: %s, innerError: %v, details: %v", e.Code, e.Message, e.InnerError, e.Details)
 }
 
 type Manager struct {
