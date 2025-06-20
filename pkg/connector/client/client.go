@@ -2,12 +2,15 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	zap "go.uber.org/zap"
 )
 
 var ValidHosts = []string{
@@ -84,6 +87,9 @@ func (a *AzureClient) doRequest(ctx context.Context,
 	var opts []uhttp.DoOption
 	if res != nil {
 		opts = append(opts, uhttp.WithResponse(res))
+		if graphErrResponse, ok := res.(*GraphResponse[any]); ok {
+			opts = append(opts, uhttp.WithErrorResponse(graphErrResponse))
+		}
 	}
 
 	resp, err := a.httpClient.Do(req, opts...)
@@ -104,6 +110,7 @@ func (a *AzureClient) requestWithToken(
 	body interface{},
 	res interface{},
 ) error {
+	l := ctxzap.Extract(ctx)
 	token, err := a.token.GetToken(ctx, policy.TokenRequestOptions{
 		Scopes: scopes,
 	})
@@ -113,6 +120,14 @@ func (a *AzureClient) requestWithToken(
 
 	err = a.doRequest(ctx, method, requestURL, token.Token, res, body)
 	if err != nil {
+		if res != nil {
+			if graphResponse, ok := res.(*GraphResponse[any]); ok {
+				if graphResponse.Error != nil {
+					l.Error("Error making request to Azure", zap.String("error", graphResponse.Error.Error()))
+					return fmt.Errorf("error making request to Azure (%s): %w", graphResponse.Error.Error(), err)
+				}
+			}
+		}
 		return err
 	}
 
