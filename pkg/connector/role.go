@@ -32,6 +32,13 @@ type roleBuilder struct {
 	cache *GenericCache[*roleAssignmentCacheValue]
 }
 
+// appears in sync logs and 404s on get
+// seen in:
+// https://github.com/Azure/azure-cli/blob/dev/src/azure-cli/azure/cli/command_modules/acs/tests/latest/recordings/test_aks_create_with_pod_ip_allocation_mode_static_block.yaml#L780
+// https://gist.github.com/cmendible/e44f10b665ba9c97cb9a9d1167c5bd99
+// https://github.com/Azure/azure-cli/issues/27798
+const UnknownInternalAzureRoleID = "aab70789-0cec-44b5-95d7-84b64c9487af"
+
 func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return roleResourceType
 }
@@ -42,6 +49,8 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	}
 	var rv []*v2.Resource
 	subscriptionID := parentResourceID.Resource
+
+	l := ctxzap.Extract(ctx)
 
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionID)
 	// Get the list of role definitions
@@ -56,6 +65,24 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 		for _, role := range resp.Value {
 			if r.conn.SkipUnusedRoles {
 				if role.ID == nil {
+					continue
+				}
+
+				if *role.ID == UnknownInternalAzureRoleID {
+					// Skipping and logging information since it will error syncs
+					roleName := "unknown"
+					if role.Name != nil {
+						roleName = *role.Name
+					}
+					roleType := "unknown"
+					if role.Type != nil {
+						roleType = *role.Type
+					}
+					roleDescription := "unknown"
+					if role.Properties != nil && role.Properties.Description != nil {
+						roleDescription = *role.Properties.Description
+					}
+					l.Warn("baton-azure-infrastructure: skipping unknown internal azure role", zap.String("role_id", *role.ID), zap.String("role_name", roleName), zap.String("type", roleType), zap.String("description", roleDescription))
 					continue
 				}
 
