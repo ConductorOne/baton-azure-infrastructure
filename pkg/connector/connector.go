@@ -23,7 +23,6 @@ import (
 
 type Connector struct {
 	token                    azcore.TokenCredential
-	MailboxSettings          bool
 	SkipAdGroups             bool
 	organizationIDs          []string
 	roleDefinitionsClient    *armauthorization.RoleDefinitionsClient
@@ -36,12 +35,9 @@ type Connector struct {
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
 	syncers := []connectorbuilder.ResourceSyncer{
-		newUserBuilder(d),
-		newGroupBuilder(d),
 		newSubscriptionBuilder(d),
 		newTenantBuilder(d),
 		newResourceGroupBuilder(d),
-		newManagedIdentityBuilder(d),
 		newEnterpriseApplicationsBuilder(d),
 		newRoleBuilder(d),
 		newStorageAccountBuilder(d),
@@ -78,7 +74,6 @@ func NewConnectorFromToken(
 	ctx context.Context,
 	httpClient *http.Client,
 	token azcore.TokenCredential,
-	mailboxSettings bool,
 	skipAdGroups bool,
 	graphDomain string,
 	skipUnusedRoles bool,
@@ -109,7 +104,6 @@ func NewConnectorFromToken(
 
 	c := &Connector{
 		token:                    token,
-		MailboxSettings:          mailboxSettings,
 		SkipAdGroups:             skipAdGroups,
 		clientFactory:            clientFactory,
 		client:                   azureClient,
@@ -129,7 +123,6 @@ func New(
 	tenantID,
 	clientID,
 	clientSecret string,
-	mailboxSettings bool,
 	skipAdGroups bool,
 	graphDomain string,
 	skipUnusedRoles bool,
@@ -174,7 +167,6 @@ func New(
 		ctx,
 		httpClient,
 		cred,
-		mailboxSettings,
 		skipAdGroups,
 		graphDomain,
 		skipUnusedRoles,

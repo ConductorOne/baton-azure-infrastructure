@@ -149,7 +149,6 @@ Flags:
   -h, --help                         help for baton-azure-infrastructure
       --log-format string            The output format for logs: json, console ($BATON_LOG_FORMAT) (default "json")
       --log-level string             The log level: debug, info, warn, error ($BATON_LOG_LEVEL) (default "info")
-      --mailboxSettings              If true, attempt to get mailbox settings for users to determine user purpose ($BATON_MAILBOXSETTINGS)
   -p, --provisioning                 This must be set in order for provisioning actions to be enabled ($BATON_PROVISIONING)
       --skip-ad-groups               If true, skip syncing Windows Server Active Directory groups ($BATON_SKIP_AD_GROUPS)
       --skip-full-sync               This must be set to skip a full sync ($BATON_SKIP_FULL_SYNC)

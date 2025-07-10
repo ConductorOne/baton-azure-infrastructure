@@ -38,60 +38,6 @@ func (e *GraphError) Error() string {
 	return fmt.Sprintf("code: %s, message: %s, innerError: %v, details: %v", e.Code, e.Message, e.InnerError, e.Details)
 }
 
-type Manager struct {
-	Id          string `json:"id,omitempty"`
-	EmployeeId  string `json:"employeeId,omitempty"`
-	Email       string `json:"mail,omitempty"`
-	DisplayName string `json:"displayName,omitempty"`
-}
-
-type MailboxSettings struct {
-	UserPurpose string `json:"userPurpose,omitempty"`
-}
-
-type User struct {
-	ID                string   `json:"id,omitempty"`
-	Email             string   `json:"mail,omitempty"`
-	DisplayName       string   `json:"displayName,omitempty"`
-	UserPrincipalName string   `json:"userPrincipalName,omitempty"`
-	JobTitle          string   `json:"jobTitle,omitempty"`
-	AccountEnabled    bool     `json:"accountEnabled,omitempty"`
-	EmployeeType      string   `json:"employeeType,omitempty"`
-	EmployeeID        string   `json:"employeeId,omitempty"`
-	Department        string   `json:"department,omitempty"`
-	Manager           *Manager `json:"manager,omitempty"`
-}
-
-type UsersList struct {
-	Context  string  `json:"@odata.context"`
-	NextLink string  `json:"@odata.nextLink"`
-	Users    []*User `json:"value,omitempty"`
-}
-
-// https://learn.microsoft.com/en-us/graph/api/resources/group?view=graph-rest-1.0#properties
-type Group struct {
-	Classification               string   `json:"classification,omitempty"`
-	Description                  string   `json:"description,omitempty"`
-	DisplayName                  string   `json:"displayName,omitempty"`
-	GroupTypes                   []string `json:"groupTypes,omitempty"`
-	ID                           string   `json:"id,omitempty"`
-	Mail                         string   `json:"mail,omitempty"`
-	MailEnabled                  bool     `json:"mailEnabled,omitempty"`
-	OnPremisesSecurityIdentifier *string  `json:"onPremisesSecurityIdentifier,omitempty"`
-	OnPremisesSyncEnabled        bool     `json:"onPremisesSyncEnabled,omitempty"`
-	SecurityEnabled              bool     `json:"securityEnabled,omitempty"`
-	SecurityIdentifier           string   `json:"securityIdentifier,omitempty"`
-	IsAssignableToRole           bool     `json:"isAssignableToRole,omitempty"`
-	IsManagementRestricted       bool     `json:"isManagementRestricted,omitempty"`
-	CreatedDateTime              string   `json:"createdDateTime,omitempty"`
-}
-
-type GroupsList struct {
-	Context  string   `json:"@odata.context"`
-	NextLink string   `json:"@odata.nextLink"`
-	Groups   []*Group `json:"value"`
-}
-
 type MembershipList struct {
 	Context  string        `json:"@odata.context"`
 	NextLink string        `json:"@odata.nextLink"`

@@ -3,10 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"net/mail"
-	"net/url"
-	"path"
-	"slices"
 	"strings"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -22,7 +18,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	expSlices "golang.org/x/exp/slices"
@@ -36,81 +31,6 @@ import (
 //			00000000-0000-0000-0000-000000000000 can be specified to signal that the principal is assigned
 //			to the resource app without any specific app roles. Required on create
 var defaultAppRoleAssignmentID string = "00000000-0000-0000-0000-000000000000"
-
-const (
-	managerIDProfileKey          = "managerId"
-	managerEmailProfileKey       = "managerEmail"
-	supervisorIDProfileKey       = "supervisorEId"
-	supervisorEmailProfileKey    = "supervisorEmail"
-	supervisorFullNameProfileKey = "supervisor"
-)
-
-// Create a new connector resource for an Entra User.
-func userResource(ctx context.Context, u *client.User, parentResourceID *v2.ResourceId, userTraitOptions ...rs.UserTraitOption) (*v2.Resource, error) {
-	primaryEmail := fetchEmailAddresses(u.Email, u.UserPrincipalName)
-	profile := map[string]interface{}{
-		"id":                u.ID,
-		"email":             primaryEmail,
-		"displayName":       u.DisplayName,
-		"title":             u.JobTitle,
-		"jobTitle":          u.JobTitle,
-		"userPrincipalName": u.UserPrincipalName,
-		"accountEnabled":    u.AccountEnabled,
-		"employeeId":        u.EmployeeID,
-		// TODO: why are we setting employeeId twice?
-		"employeeNumber": u.EmployeeID,
-		"department":     u.Department,
-	}
-
-	if u.Manager != nil {
-		profile[managerIDProfileKey] = u.Manager.Id
-		profile[managerEmailProfileKey] = u.Manager.Email
-		profile[supervisorIDProfileKey] = u.Manager.EmployeeId
-		profile[supervisorEmailProfileKey] = u.Manager.Email
-		profile[supervisorFullNameProfileKey] = u.Manager.DisplayName
-	}
-
-	options := []rs.UserTraitOption{
-		rs.WithEmail(primaryEmail, true),
-		rs.WithUserProfile(profile),
-	}
-
-	options = append(options, userTraitOptions...)
-	if !IsEmpty(u.UserPrincipalName) {
-		options = append(options, rs.WithUserLogin(u.UserPrincipalName))
-	}
-
-	if u.AccountEnabled {
-		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED))
-	} else {
-		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
-	}
-
-	ret, err := rs.NewUserResource(
-		u.DisplayName,
-		userResourceType,
-		u.ID,
-		options,
-		rs.WithParentResourceID(parentResourceID),
-		rs.WithAnnotation(&v2.ExternalLink{
-			Url: userURL(u),
-		}),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
-
-func userURL(u *client.User) string {
-	return (&url.URL{
-		Scheme:   "https",
-		Host:     "entra.microsoft.com",
-		Path:     "/",
-		Fragment: path.Join("view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId", u.ID),
-	}).String()
-}
 
 func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, error) {
 	b := &pagination.Bag{}
@@ -129,171 +49,12 @@ func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, error
 	return b, nil
 }
 
-func fetchEmailAddresses(email string, upn string) string {
-	var upnEmail string
-	primaryEmail := email
-	addr, err := mail.ParseAddress(upn)
-	if err == nil {
-		upnEmail = addr.Address
-	}
-
-	if IsEmpty(primaryEmail) && !IsEmpty(upnEmail) {
-		primaryEmail = upnEmail
-	}
-
-	return primaryEmail
-}
-
-func groupResource(ctx context.Context, g *client.Group, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
-	profile := map[string]interface{}{
-		"object_id":           g.ID,
-		"group_type":          groupTypeValue(g),
-		"membership_type":     membershipTypeValue(g),
-		"mail_enabled":        g.MailEnabled,
-		"security_enabled":    g.SecurityEnabled,
-		"security_identifier": g.SecurityIdentifier,
-	}
-
-	if !IsEmpty(g.Mail) {
-		profile["mail"] = g.Mail
-	}
-
-	if !IsEmpty(g.Classification) {
-		profile["classification"] = g.Classification
-	}
-
-	if g.OnPremisesSecurityIdentifier != nil {
-		profile["on_premises_security_identifier"] = *g.OnPremisesSecurityIdentifier
-	}
-
-	if g.OnPremisesSyncEnabled {
-		profile["on_premises_sync_enabled"] = g.OnPremisesSyncEnabled
-	}
-
-	groupTraitOptions := []rs.GroupTraitOption{rs.WithGroupProfile(profile)}
-	rv, err := rs.NewGroupResource(
-		g.DisplayName,
-		groupResourceType,
-		g.ID,
-		groupTraitOptions,
-		rs.WithAnnotation(&v2.ExternalLink{
-			Url: groupURL(g),
-		}),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return rv, nil
-}
-
 func IsEmpty(field string) bool {
 	return field == ""
 }
 
-func groupURL(g *client.Group) string {
-	return (&url.URL{
-		Scheme:   "https",
-		Host:     "entra.microsoft.com",
-		Path:     "/",
-		Fragment: path.Join("view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Overview/groupId/", g.ID),
-	}).String()
-}
-
-func groupTypeValue(g *client.Group) string {
-	if slices.Contains(g.GroupTypes, "Unified") {
-		return "microsoft_365"
-	}
-
-	if g.MailEnabled && g.SecurityEnabled {
-		return "mail_enabled_security"
-	}
-
-	if g.SecurityEnabled {
-		return "security"
-	}
-
-	if g.MailEnabled {
-		return "distribution"
-	}
-
-	return ""
-}
-
-func membershipTypeValue(g *client.Group) string {
-	if slices.Contains(g.GroupTypes, "DynamicMembership") {
-		return "dynamic"
-	}
-
-	return "assigned"
-}
-
-func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, permission string) string {
-	return fmt.Sprintf(
-		"%s-grant:%s:%s:%s:%s",
-		resourceID.ResourceType,
-		resourceID.Resource,
-		principalId.ResourceType,
-		principalId.Resource,
-		permission,
-	)
-}
-
-func getGroupGrants(ctx context.Context, resp *client.MembershipList, resource *v2.Resource, ps *pagination.PageState) ([]*v2.Grant, error) {
-	grants, err := ConvertErr(resp.Members, func(gm *client.Membership) (*v2.Grant, error) {
-		var annos annotations.Annotations
-		objectID := resource.Id.GetResource()
-		rid := &v2.ResourceId{Resource: gm.Id}
-		switch gm.Type {
-		case odataTypeGroup:
-			rid.ResourceType = groupResourceType.Id
-			annos.Update(&v2.GrantExpandable{
-				EntitlementIds: []string{
-					fmt.Sprintf("group:%s:members", rid.Resource),
-				},
-			})
-		case odataTypeUser:
-			rid.ResourceType = userResourceType.Id
-		case odataTypeServicePrincipal:
-			switch gm.ServicePrincipalType {
-			case spTypeApplication:
-				rid.ResourceType = enterpriseApplicationResourceType.Id
-			case spTypeManagedIdentity:
-				rid.ResourceType = managedIdentitylResourceType.Id
-			case spTypeLegacy, spTypeSocialIdp, "":
-				// https://learn.microsoft.com/en-us/graph/api/resources/serviceprincipal?view=graph-rest-1.0
-				fallthrough
-			default:
-				return nil, nil
-			}
-		default:
-			return nil, nil
-		}
-		ur := &v2.Resource{Id: rid}
-		return &v2.Grant{
-			Id: fmtResourceGrant(resource.Id, ur.Id, objectID+":"+ps.ResourceTypeID),
-			Entitlement: &v2.Entitlement{
-				Id:       fmt.Sprintf("group:%s:%s", resource.Id.Resource, ps.ResourceTypeID),
-				Resource: resource,
-			},
-			Principal:   ur,
-			Annotations: annos,
-		}, nil
-	})
-
-	return grants, err
-}
-
-func getGroupGrantURL(principal *v2.Resource) string {
-	return (&url.URL{
-		Scheme: "https",
-		Host:   "graph.microsoft.com",
-		Path:   path.Join("v1.0", "directoryObjects", principal.Id.Resource),
-	}).String()
-}
-
 // https://learn.microsoft.com/es-es/rest/api/subscription/subscriptions/list?view=rest-subscription-2021-10-01&tabs=HTTP
-func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) (*v2.Resource, error) {
+func subscriptionResource(_ context.Context, s *armsubscription.Subscription) (*v2.Resource, error) {
 	var appTraitOpts []rs.AppTraitOption
 	profile := map[string]interface{}{
 		"subscriptionId": StringValue(s.SubscriptionID),
@@ -318,7 +79,7 @@ func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) 
 }
 
 // https://learn.microsoft.com/es-es/rest/api/subscription/tenants/list?view=rest-subscription-2021-10-01&tabs=HTTP
-func tenantResource(ctx context.Context, t *armsubscription.TenantIDDescription) (*v2.Resource, error) {
+func tenantResource(_ context.Context, t *armsubscription.TenantIDDescription) (*v2.Resource, error) {
 	var opts []rs.ResourceOption
 	profile := map[string]interface{}{
 		"tenantId":       StringValue(t.ID),
@@ -348,7 +109,7 @@ func getResourceGroupID(name, subscriptionID, roleID string) string {
 }
 
 // https://learn.microsoft.com/es-es/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
-func resourceGroupResource(ctx context.Context, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func resourceGroupResource(_ context.Context, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var opts []rs.ResourceOption
 	profile := map[string]interface{}{
 		"id":       StringValue(rg.ID),
@@ -375,7 +136,7 @@ func resourceGroupResource(ctx context.Context, rg *armresources.ResourceGroup, 
 	return resource, nil
 }
 
-func roleAssignmentResourceGroupResource(ctx context.Context, subscriptionID, roleID string, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func roleAssignmentResourceGroupResource(_ context.Context, subscriptionID, roleID string, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var opts []rs.ResourceOption
 	profile := map[string]interface{}{
 		"id":       StringValue(rg.ID),
@@ -426,7 +187,7 @@ func BoolValue(v *bool) bool {
 	return false
 }
 
-func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func roleResource(_ context.Context, role *armauthorization.RoleDefinition, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var (
 		strRoleID string
 		opts      []rs.ResourceOption
@@ -523,44 +284,7 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 	return "", nil
 }
 
-func managedIdentityResource(ctx context.Context, sp *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
-	profile := make(map[string]interface{})
-	profile["id"] = sp.ID
-	profile["app_id"] = sp.AppId
-	options := []rs.UserTraitOption{
-		rs.WithUserProfile(profile),
-		rs.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_SERVICE),
-	}
-
-	if !IsEmpty(sp.Info.LogoUrl) {
-		options = append(options, rs.WithUserIcon(&v2.AssetRef{
-			Id: sp.Info.LogoUrl,
-		}))
-	}
-
-	if sp.AccountEnabled {
-		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED))
-	} else {
-		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
-	}
-	ret, err := rs.NewUserResource(
-		sp.GetDisplayName(),
-		managedIdentitylResourceType,
-		sp.ID,
-		options,
-		rs.WithParentResourceID(parentResourceID),
-		rs.WithAnnotation(&v2.ExternalLink{
-			Url: sp.ExternalURL(),
-		}),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
-
-func enterpriseApplicationResource(ctx context.Context, app *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func enterpriseApplicationResource(_ context.Context, app *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := make(map[string]interface{})
 	profile["id"] = app.ID
 	profile["app_id"] = app.AppId

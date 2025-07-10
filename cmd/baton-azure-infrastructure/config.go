@@ -28,10 +28,6 @@ var (
 		"azure-client-id",
 		field.WithDescription("Azure Client ID"),
 	)
-	mailboxSettings = field.BoolField(
-		"mailboxSettings",
-		field.WithDescription("If true, attempt to get mailbox settings for users to determine user purpose"),
-	)
 	skipAdGroups = field.BoolField(
 		"skip-ad-groups",
 		field.WithDescription("If true, skip syncing Windows Server Active Directory groups"),
@@ -58,7 +54,6 @@ var ConfigurationFields = []field.SchemaField{
 	azureClientSecret,
 	azureTenantId,
 	azureClientId,
-	mailboxSettings,
 	skipAdGroups,
 	graphDomain,
 	skipUnusedRoles,

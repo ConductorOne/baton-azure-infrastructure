@@ -61,34 +61,6 @@ func TestEnterpriseCalls(t *testing.T) {
 	}
 }
 
-func TestUserBuilderList(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.NoError(t, err)
-
-	u := newUserBuilder(connTest)
-	res, _, _, err := u.List(ctxTest, nil, &pagination.Token{})
-	require.NoError(t, err)
-	require.NotNil(t, res)
-}
-
-func TestGroupBuilderList(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.NoError(t, err)
-
-	u := newGroupBuilder(connTest)
-	res, _, _, err := u.List(ctxTest, nil, &pagination.Token{})
-	require.NoError(t, err)
-	require.NotNil(t, res)
-}
-
 func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecret, entraClientId string) (*Connector, error) {
 	cb, err := New(
 		ctx,
@@ -96,7 +68,6 @@ func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecre
 		entraTenantId,
 		entraClientId,
 		entraClientSecret,
-		false,
 		false,
 		"graph.microsoft.com",
 		false,
@@ -295,7 +266,7 @@ func getRoleForTesting(ctxTest context.Context, subscriptionId, roleId, name, de
 	}, nil)
 }
 
-func getRoleAssignmentResourceGroupForTesting(ctxTest context.Context, subscriptionId, roleId, resourceGroupName, description string) (*v2.Resource, error) {
+func getRoleAssignmentResourceGroupForTesting(ctxTest context.Context, subscriptionId, roleId, resourceGroupName, _ string) (*v2.Resource, error) {
 	strRoleId := subscriptionRoleId(subscriptionId, roleId)
 	return roleAssignmentResourceGroupResource(ctxTest,
 		subscriptionId,
