@@ -101,6 +101,7 @@ func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecre
 		"graph.microsoft.com",
 		false,
 		false,
+		false,
 	)
 
 	if err != nil {

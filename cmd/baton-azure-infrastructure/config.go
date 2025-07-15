@@ -51,6 +51,12 @@ var (
 		field.WithDescription("If true, storage containers is skipped"),
 		field.WithDefaultValue(false),
 	)
+	enableSyncExternalResourcesViaBatonID = field.BoolField(
+		"enable-sync-external-resources-via-baton-id",
+		field.WithDescription(`If true, the connector will use baton id to sync users and groups from external resources.
+		 This could break the sync if the Baton ID external resource is not set up correctly.`),
+		field.WithDefaultValue(false),
+	)
 )
 
 var ConfigurationFields = []field.SchemaField{
@@ -63,6 +69,7 @@ var ConfigurationFields = []field.SchemaField{
 	graphDomain,
 	skipUnusedRoles,
 	skipStorageContainerSync,
+	enableSyncExternalResourcesViaBatonID,
 }
 
 var FieldRelationships = []field.SchemaFieldRelationship{
