@@ -145,7 +145,7 @@ Flags:
       --azure-tenant-id string       Azure Tenant ID ($BATON_AZURE_TENANT_ID)
       --client-id string             The client ID used to authenticate with ConductorOne ($BATON_CLIENT_ID)
       --client-secret string         The client secret used to authenticate with ConductorOne ($BATON_CLIENT_SECRET)
-      --enable-sync-external-resources-via-baton-id   If true, the connector will use baton id to sync users and groups from external resources. This could break the sync if the Baton ID external resource is not set up correctly. ($BATON_ENABLE_SYNC_EXTERNAL_RESOURCES_VIA_BATON_ID)
+      --enable-sync-external-resources-via-baton-id   If true, the connector will use baton id to sync users, groups, and managed identities from external resources. This could break the sync if the Baton ID external resource is not set up correctly. ($BATON_ENABLE_SYNC_EXTERNAL_RESOURCES_VIA_BATON_ID)
   -f, --file string                  The path to the c1z file to sync with ($BATON_FILE) (default "sync.c1z")
   -h, --help                         help for baton-azure-infrastructure
       --log-format string            The output format for logs: json, console ($BATON_LOG_FORMAT) (default "json")

@@ -38,7 +38,7 @@ type Connector struct {
 func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
 	syncers := []connectorbuilder.ResourceSyncer{}
 
-	// If we are syncing external resources via baton id, we need to sync users and groups.
+	// If we are syncing external resources via baton id, we don't need to sync users and groups.
 	if !d.enableSyncExternalResourcesViaBatonID {
 		syncers = append(syncers, newUserBuilder(d), newGroupBuilder(d), newManagedIdentityBuilder(d))
 	}
