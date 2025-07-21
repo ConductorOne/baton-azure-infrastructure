@@ -22,30 +22,36 @@ import (
 )
 
 type Connector struct {
-	token                    azcore.TokenCredential
-	MailboxSettings          bool
-	SkipAdGroups             bool
-	organizationIDs          []string
-	roleDefinitionsClient    *armauthorization.RoleDefinitionsClient
-	clientFactory            *armsubscription.ClientFactory
-	client                   *client.AzureClient
-	SkipUnusedRoles          bool
-	skipStorageContainerSync bool
+	token                                 azcore.TokenCredential
+	MailboxSettings                       bool
+	SkipAdGroups                          bool
+	organizationIDs                       []string
+	roleDefinitionsClient                 *armauthorization.RoleDefinitionsClient
+	clientFactory                         *armsubscription.ClientFactory
+	client                                *client.AzureClient
+	SkipUnusedRoles                       bool
+	skipStorageContainerSync              bool
+	enableSyncExternalResourcesViaBatonID bool
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers := []connectorbuilder.ResourceSyncer{
-		newUserBuilder(d),
-		newGroupBuilder(d),
+	syncers := []connectorbuilder.ResourceSyncer{}
+
+	// If we are syncing external resources via baton id, we don't need to sync users and groups.
+	if !d.enableSyncExternalResourcesViaBatonID {
+		syncers = append(syncers, newUserBuilder(d), newGroupBuilder(d), newManagedIdentityBuilder(d))
+	}
+
+	syncers = append(
+		syncers,
 		newSubscriptionBuilder(d),
 		newTenantBuilder(d),
 		newResourceGroupBuilder(d),
-		newManagedIdentityBuilder(d),
 		newEnterpriseApplicationsBuilder(d),
 		newRoleBuilder(d),
 		newStorageAccountBuilder(d),
-	}
+	)
 
 	if !d.skipStorageContainerSync {
 		syncers = append(syncers, newContainerBuilder(d))
@@ -83,6 +89,7 @@ func NewConnectorFromToken(
 	graphDomain string,
 	skipUnusedRoles bool,
 	skipStorageContainerSync bool,
+	syncExternalResourcesViaBatonID bool,
 ) (*Connector, error) {
 	azureClient, err := client.NewAzureClient(ctx, httpClient, token, skipAdGroups, graphDomain)
 	if err != nil {
@@ -108,15 +115,16 @@ func NewConnectorFromToken(
 	}
 
 	c := &Connector{
-		token:                    token,
-		MailboxSettings:          mailboxSettings,
-		SkipAdGroups:             skipAdGroups,
-		clientFactory:            clientFactory,
-		client:                   azureClient,
-		organizationIDs:          organizationIDs,
-		SkipUnusedRoles:          skipUnusedRoles,
-		skipStorageContainerSync: skipStorageContainerSync,
-		roleDefinitionsClient:    roleDefinitionsClient,
+		token:                                 token,
+		MailboxSettings:                       mailboxSettings,
+		SkipAdGroups:                          skipAdGroups,
+		clientFactory:                         clientFactory,
+		client:                                azureClient,
+		organizationIDs:                       organizationIDs,
+		SkipUnusedRoles:                       skipUnusedRoles,
+		skipStorageContainerSync:              skipStorageContainerSync,
+		roleDefinitionsClient:                 roleDefinitionsClient,
+		enableSyncExternalResourcesViaBatonID: syncExternalResourcesViaBatonID,
 	}
 
 	return c, nil
@@ -134,6 +142,7 @@ func New(
 	graphDomain string,
 	skipUnusedRoles bool,
 	skipStorageContainerSync bool,
+	enableSyncExternalResourcesViaBatonID bool,
 ) (*Connector, error) {
 	var cred azcore.TokenCredential
 	httpClient, err := uhttp.NewClient(
@@ -179,5 +188,6 @@ func New(
 		graphDomain,
 		skipUnusedRoles,
 		skipStorageContainerSync,
+		enableSyncExternalResourcesViaBatonID,
 	)
 }
