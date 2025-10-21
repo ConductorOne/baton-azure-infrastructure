@@ -20,7 +20,7 @@ func (er *ErrorResponse) Message() string {
 	if er.Error != nil {
 		return fmt.Sprintf("code: %s; message: %s; innerError: %v", er.Error.Code, er.Error.Message, er.Error.InnerError)
 	}
-	return "EMPTY_ERROR_RESPONSE"
+	return "empty error"
 }
 
 type GraphError struct {

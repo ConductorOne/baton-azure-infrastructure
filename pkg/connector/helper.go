@@ -990,5 +990,5 @@ func getDetailedErrorMessage(err error) string {
 		}
 	}
 
-	return "empty message"
+	return "empty error"
 }

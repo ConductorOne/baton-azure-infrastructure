@@ -246,10 +246,11 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 				// The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license in order to request data to '/privilegedAccess/' API.
 				if status.Code(err) == codes.Unknown && errorIsPremiumLicenseRequired(err) {
 					errorMessage := getDetailedErrorMessage(err)
-					l.Error("Permission denied for get privileged access. Premium License on Tenant is required",
+					l.Debug("Premium License on Tenant is required",
 						zap.String("scope", storageResourceIDs.AzureId()),
 						zap.String("message", errorMessage),
 					)
+					
 					return nil, "", nil, nil
 				}
 
@@ -273,7 +274,11 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 			// The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license in order to request data to '/privilegedAccess/' API.
 			if status.Code(err) == codes.Unknown && errorIsPremiumLicenseRequired(err) {
 				errorMessage := getDetailedErrorMessage(err)
-				l.Error("Permission denied for get privileged access. Premium License on Tenant is required", zap.String("scope", storageResourceIDs.AzureId()), zap.String("message", errorMessage))
+				l.Debug("Premium License on Tenant is required",
+					zap.String("scope", storageResourceIDs.AzureId()),
+					zap.String("message", errorMessage),
+				)
+
 				return nil, "", nil, nil
 			}
 
