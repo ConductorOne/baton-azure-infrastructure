@@ -10,14 +10,17 @@ type GraphResponse[T any] struct {
 	Context  string `json:"@odata.context"`
 	NextLink string `json:"@odata.nextLink"`
 	Value    T
-	Error    *GraphError `json:"error,omitempty"`
 }
 
-func (r *GraphResponse[any]) Message() string {
-	if r.Error != nil {
-		return r.Error.Error()
+type ErrorResponse struct {
+	Error *GraphError `json:"error,omitempty"`
+}
+
+func (er *ErrorResponse) Message() string {
+	if er.Error != nil {
+		return fmt.Sprintf("code: %s; message: %s; innerError: %v", er.Error.Code, er.Error.Message, er.Error.InnerError)
 	}
-	return ""
+	return "EMPTY_ERROR_RESPONSE"
 }
 
 type GraphError struct {

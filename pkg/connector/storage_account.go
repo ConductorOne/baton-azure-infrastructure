@@ -227,9 +227,9 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 
 			grants = append(grants, newGrant)
 		}
+
 	case "ELIGIBLE":
 		privilegedId := state.Value
-
 		if privilegedId == "" {
 			privilegedAccess, err := usr.conn.client.GetPrivilegedAccessFromAzure(ctx, storageResourceIDs.AzureId())
 			if err != nil {
@@ -240,6 +240,13 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 
 				if status.Code(err) == codes.PermissionDenied {
 					l.Error("Permission denied for get privileged access", zap.String("scope", storageResourceIDs.AzureId()))
+					return nil, "", nil, nil
+				}
+
+				// The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license in order to request data to '/privilegedAccess/' API.
+				if status.Code(err) == codes.Unknown && errorIsPremiumLicenseRequired(err) {
+					errorMessage := getDetailedErrorMessage(err)
+					l.Error("Permission denied for get privileged access. Premium License on Tenant is required", zap.String("scope", storageResourceIDs.AzureId()), zap.String("message", errorMessage))
 					return nil, "", nil, nil
 				}
 
@@ -259,6 +266,14 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 				l.Error("Permission denied for get privileged access roles", zap.String("scope", privilegedId))
 				return nil, "", nil, nil
 			}
+
+			// The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license in order to request data to '/privilegedAccess/' API.
+			if status.Code(err) == codes.Unknown && errorIsPremiumLicenseRequired(err) {
+				errorMessage := getDetailedErrorMessage(err)
+				l.Error("Permission denied for get privileged access. Premium License on Tenant is required", zap.String("scope", storageResourceIDs.AzureId()), zap.String("message", errorMessage))
+				return nil, "", nil, nil
+			}
+
 			return nil, "", nil, err
 		}
 

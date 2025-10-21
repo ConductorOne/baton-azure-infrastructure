@@ -11,6 +11,8 @@ Check out [Baton](https://github.com/conductorone/baton) to learn more the proje
 # Requirements
 
 - You need a Microsoft tenant. You get one with an [Azure free trial](https://azure.microsoft.com/pricing/free-trial/).
+- Some of the more specific data is accessed via the Privileged Identity Management API. 
+   For this, the tenant requires the corresponding Premium License such as "Microsoft Entra ID P2" or "Microsoft Entra ID Governance". Not having one of them implies that a portion of the data will not be visible. 
 - Once you have a tenant, you need to create an application in Azure AD. You can follow the
   instructions [here](https://docs.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app).
 - When you create the application, you will get a `client_id` and a `client_secret`. You will need these to authenticate
@@ -23,9 +25,9 @@ Check out [Baton](https://github.com/conductorone/baton) to learn more the proje
         - ServicePrincipalEndpoint.Read.All
         - User.Read
         - User.Read.All
-        - PrivilegedAccess.Read.AzureAD
-        - PrivilegedAccess.Read.AzureADGroup
-        - PrivilegedAccess.Read.AzureResources
+        - PrivilegedAccess.Read.AzureAD [it also requires the corresponding Premium License in order to access]
+        - PrivilegedAccess.Read.AzureADGroup [it also requires the corresponding Premium License in order to access]
+        - PrivilegedAccess.Read.AzureResources [it also requires the corresponding Premium License in order to access]
     - Needs to add the application as Reader in the Azure Subscription that you want to sync
 - Then you will need to get the `tenant_id` of your Azure AD tenant. You can find this in the Azure Entra ID Overview
   page [here](https://portal.azure.com/#blade/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/Overview).
