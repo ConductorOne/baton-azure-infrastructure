@@ -250,7 +250,7 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 						zap.String("scope", storageResourceIDs.AzureId()),
 						zap.String("message", errorMessage),
 					)
-					
+
 					return nil, "", nil, nil
 				}
 
