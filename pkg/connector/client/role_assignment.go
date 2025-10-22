@@ -41,6 +41,7 @@ func (a *AzureClient) GetRoleAssignments(
 	return result, nil
 }
 
+// GetPrivilegedAccessFromAzure requires the tenant to have "Microsoft Entra ID P2" or "Microsoft Entra ID Governance" license.
 func (a *AzureClient) GetPrivilegedAccessFromAzure(
 	ctx context.Context,
 	scope string,
@@ -65,6 +66,7 @@ func (a *AzureClient) GetPrivilegedAccessFromAzure(
 	return response.Value[0], nil
 }
 
+// GetPrivilegedAccessRoleAssignments requires the tenant to have "Microsoft Entra ID P2" or "Microsoft Entra ID Governance" license.
 func (a *AzureClient) GetPrivilegedAccessRoleAssignments(ctx context.Context, pmiId string, nextLink string) ([]PMIRoleAssigment, string, error) {
 	builder := a.QueryBuilder().
 		Version(Beta).
