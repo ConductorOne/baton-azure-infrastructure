@@ -102,6 +102,7 @@ func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecre
 		false,
 		false,
 		false,
+		false,
 	)
 
 	if err != nil {
