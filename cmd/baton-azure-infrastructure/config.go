@@ -16,45 +16,60 @@ var (
 		"use-cli-credentials",
 		field.WithDescription("If true, uses the az cli to auth"),
 	)
+
 	azureClientSecret = field.StringField(
 		"azure-client-secret",
 		field.WithDescription("Azure Client Secret"),
 	)
+
 	azureTenantId = field.StringField(
 		"azure-tenant-id",
 		field.WithDescription("Azure Tenant ID"),
 	)
+
 	azureClientId = field.StringField(
 		"azure-client-id",
 		field.WithDescription("Azure Client ID"),
 	)
+
 	mailboxSettings = field.BoolField(
 		"mailboxSettings",
 		field.WithDescription("If true, attempt to get mailbox settings for users to determine user purpose"),
 	)
+
 	skipAdGroups = field.BoolField(
 		"skip-ad-groups",
 		field.WithDescription("If true, skip syncing Windows Server Active Directory groups"),
 	)
+
 	graphDomain = field.StringField(
 		"graph-domain",
 		field.WithDescription("Domain for Microsoft Graph API"),
 		field.WithDefaultValue("graph.microsoft.com"),
 	)
+
 	skipUnusedRoles = field.BoolField(
 		"skip-unused-roles",
 		field.WithDescription("Skip unused roles"),
 		field.WithDefaultValue(false),
 	)
+
 	skipStorageContainerSync = field.BoolField(
 		"skip-sync-storage-containers",
 		field.WithDescription("If true, storage containers is skipped"),
 		field.WithDefaultValue(false),
 	)
+
 	enableSyncExternalResourcesViaBatonID = field.BoolField(
 		"enable-sync-external-resources-via-baton-id",
 		field.WithDescription(`If true, the connector will use baton id to sync users and groups from external resources.
 		 This could break the sync if the Baton ID external resource is not set up correctly.`),
+		field.WithDefaultValue(false),
+	)
+
+	skipEntraIDP2LicenseFeatures = field.BoolField(
+		"skip-entra-id-p2-license-features",
+		field.WithDescription("If true, skips the features that require a 'Microsoft Entra ID P2' or 'Microsoft Entra ID Governance' license on the tenant."),
 		field.WithDefaultValue(false),
 	)
 )
@@ -70,6 +85,7 @@ var ConfigurationFields = []field.SchemaField{
 	skipUnusedRoles,
 	skipStorageContainerSync,
 	enableSyncExternalResourcesViaBatonID,
+	skipEntraIDP2LicenseFeatures,
 }
 
 var FieldRelationships = []field.SchemaFieldRelationship{

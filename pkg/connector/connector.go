@@ -32,6 +32,7 @@ type Connector struct {
 	SkipUnusedRoles                       bool
 	skipStorageContainerSync              bool
 	enableSyncExternalResourcesViaBatonID bool
+	skipEntraIDP2LicenseFeatures          bool
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
@@ -90,6 +91,7 @@ func NewConnectorFromToken(
 	skipUnusedRoles bool,
 	skipStorageContainerSync bool,
 	syncExternalResourcesViaBatonID bool,
+	skipEntraIDP2LicenseFeatures bool,
 ) (*Connector, error) {
 	azureClient, err := client.NewAzureClient(ctx, httpClient, token, skipAdGroups, graphDomain)
 	if err != nil {
@@ -125,6 +127,7 @@ func NewConnectorFromToken(
 		skipStorageContainerSync:              skipStorageContainerSync,
 		roleDefinitionsClient:                 roleDefinitionsClient,
 		enableSyncExternalResourcesViaBatonID: syncExternalResourcesViaBatonID,
+		skipEntraIDP2LicenseFeatures:          skipEntraIDP2LicenseFeatures,
 	}
 
 	return c, nil
@@ -143,6 +146,7 @@ func New(
 	skipUnusedRoles bool,
 	skipStorageContainerSync bool,
 	enableSyncExternalResourcesViaBatonID bool,
+	skipEntraIDP2LicenseFeatures bool,
 ) (*Connector, error) {
 	var cred azcore.TokenCredential
 	httpClient, err := uhttp.NewClient(
@@ -189,5 +193,6 @@ func New(
 		skipUnusedRoles,
 		skipStorageContainerSync,
 		enableSyncExternalResourcesViaBatonID,
+		skipEntraIDP2LicenseFeatures,
 	)
 }

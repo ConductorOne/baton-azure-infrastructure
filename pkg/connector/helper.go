@@ -43,8 +43,6 @@ const (
 	supervisorIDProfileKey       = "supervisorEId"
 	supervisorEmailProfileKey    = "supervisorEmail"
 	supervisorFullNameProfileKey = "supervisor"
-
-	codeForPremiumLicenseRequired = "AadPremiumLicenseRequired"
 )
 
 // Create a new connector resource for an Entra User.
@@ -972,23 +970,4 @@ func grantFromEligibleAssignment(ctx context.Context, resource *v2.Resource, ass
 		id,
 		grantOpts...,
 	), nil
-}
-
-func errorIsPremiumLicenseRequired(err error) bool {
-	return strings.Contains(err.Error(), codeForPremiumLicenseRequired)
-}
-
-func getDetailedErrorMessage(err error) string {
-	errorDetail := strings.Split(err.Error(), "; ")
-
-	for _, detail := range errorDetail {
-		if strings.Contains(detail, "message:") {
-			message := strings.Split(detail, ": ")
-			if len(message) == 2 {
-				return message[1]
-			}
-		}
-	}
-
-	return "empty error"
 }
