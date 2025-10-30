@@ -13,6 +13,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"google.golang.org/grpc/codes"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 
@@ -722,7 +724,7 @@ func getAssignmentID(ctx context.Context, conn *Connector, scope, subscriptionID
 		}
 	}
 
-	return "", fmt.Errorf("role assignment not found")
+	return "", uhttp.WrapErrors(codes.NotFound, "role assignment not found")
 }
 
 func subscriptionRoleId(subscriptionID, roleID string) string {
@@ -745,7 +747,7 @@ func newStorageResourceSplitIdDataFromConnectorId(connectorId string) (*storageR
 	splitValue := strings.Split(connectorId, ":")
 
 	if len(splitValue) != 5 {
-		return nil, fmt.Errorf("invalid storage resource split id")
+		return nil, uhttp.WrapErrors(codes.InvalidArgument, "invalid storage resource split id")
 	}
 
 	return &storageResourceSplitIdData{
@@ -784,9 +786,12 @@ func newStorageResourceSplitIdDataFromAzureId(id string) (*storageResourceSplitI
 	// By docs the value should be
 	// Ex - /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/{resourceProviderNamespace}/{resourceType}/{resourceName}
 	if len(splits) != 9 {
-		return nil, fmt.Errorf(
-			"unexpected number of splits, ex: '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/{resourceProviderNamespace}/{resourceType}/{resourceName}', got %s",
-			id,
+		return nil, uhttp.WrapErrors(
+			codes.InvalidArgument,
+			fmt.Sprintf(
+				"unexpected number of splits, ex: '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/{resourceProviderNamespace}/{resourceType}/{resourceName}', got %s",
+				id,
+			),
 		)
 	}
 
@@ -875,7 +880,7 @@ func storageAccountResource(ctx context.Context, account *armstorage.Account, pa
 func roleIdFromRoleDefinitionId(roleDefinitionId string) (string, error) {
 	splitValues := strings.Split(roleDefinitionId, "/")
 	if len(splitValues) != 7 {
-		return "", fmt.Errorf("invalid role definition id %s", roleDefinitionId)
+		return "", uhttp.WrapErrors(codes.InvalidArgument, fmt.Sprintf("invalid role definition id %s", roleDefinitionId))
 	}
 	return splitValues[len(splitValues)-1], nil
 }
@@ -887,7 +892,7 @@ func grantFromRoleAssigment(
 	in *armauthorization.RoleAssignment,
 ) (*v2.Grant, error) {
 	if in.Properties.RoleDefinitionID == nil {
-		return nil, fmt.Errorf("role definition id is nil")
+		return nil, uhttp.WrapErrors(codes.Internal, "role definition id is nil")
 	}
 
 	roleIdFromSplit, err := roleIdFromRoleDefinitionId(*in.Properties.RoleDefinitionID)

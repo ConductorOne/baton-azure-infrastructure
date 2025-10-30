@@ -2,9 +2,11 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"google.golang.org/grpc/codes"
 )
 
 var userFields = []string{
@@ -35,7 +37,7 @@ func (a *AzureClient) Users(ctx context.Context, nextLink string) (*UsersList, e
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-azure-infrastructure: error fetching users: %w", err)
+		return nil, uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: error fetching users", err)
 	}
 
 	return resp, nil
@@ -53,7 +55,7 @@ func (a *AzureClient) UserMailboxSetting(ctx context.Context, userId string) (*M
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-azure-infrastructure: error fetching mailbox setting: %w", err)
+		return nil, uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: error fetching mailbox setting", err)
 	}
 
 	return resp, nil

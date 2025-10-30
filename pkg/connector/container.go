@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"google.golang.org/grpc/codes"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 
@@ -37,7 +39,7 @@ func (usr *containerBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	}
 
 	if parentResourceID.ResourceType != storageAccountResourceType.Id {
-		return nil, "", nil, fmt.Errorf("invalid resource type: %s", parentResourceID.ResourceType)
+		return nil, "", nil, uhttp.WrapErrors(codes.InvalidArgument, fmt.Sprintf("invalid resource type: %s", parentResourceID.ResourceType))
 	}
 
 	storageId, err := newStorageResourceSplitIdDataFromConnectorId(parentResourceID.Resource)
@@ -144,7 +146,7 @@ func (usr *containerBuilder) getRoleDefinition(ctx context.Context, roleDefiniti
 
 	roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
 	if err != nil {
-		return armauthorization.RoleDefinitionsClientGetByIDResponse{}, fmt.Errorf("failed to get role definition: %w", err)
+		return armauthorization.RoleDefinitionsClientGetByIDResponse{}, uhttp.WrapErrors(codes.Unavailable, "failed to get role definition", err)
 	}
 
 	usr.roleCacheMutex.Lock()
@@ -157,7 +159,7 @@ func (usr *containerBuilder) getRoleDefinition(ctx context.Context, roleDefiniti
 // Grants always returns an empty slice for users since they don't have any entitlements.
 func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	if resource.ParentResourceId == nil || resource.ParentResourceId.ResourceType != storageAccountResourceType.Id {
-		return nil, "", nil, fmt.Errorf("container resource must have a parent resource from type %s", storageAccountResourceType.Id)
+		return nil, "", nil, uhttp.WrapErrors(codes.InvalidArgument, fmt.Sprintf("container resource must have a parent resource from type %s", storageAccountResourceType.Id))
 	}
 
 	// RoleDefinitionsIds
@@ -176,7 +178,7 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 	if bag.Current() == nil {
 		idSplit := strings.Split(resource.Id.Resource, ":")
 		if len(idSplit) != 2 {
-			return nil, "", nil, fmt.Errorf("invalid resource id: %s", resource.Id.Resource)
+			return nil, "", nil, uhttp.WrapErrors(codes.InvalidArgument, fmt.Sprintf("invalid resource id: %s", resource.Id.Resource))
 		}
 
 		containerName := idSplit[1]

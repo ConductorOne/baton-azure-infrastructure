@@ -2,9 +2,11 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"google.golang.org/grpc/codes"
 )
 
 var servicePrincipalSelect = []string{
@@ -35,7 +37,7 @@ func (a *AzureClient) ListServicePrincipals(ctx context.Context, nextLink string
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, nextLink, nil, resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-azure-infrastrucure: failed to get service principals: %w", err)
+		return nil, uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: failed to get service principals", err)
 	}
 
 	return resp, nil
@@ -51,7 +53,7 @@ func (a *AzureClient) ServicePrincipal(ctx context.Context, id string) (*Service
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, url, nil, resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-azure-infrastrucure: failed to get service principal: %w", err)
+		return nil, uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: failed to get service principal", err)
 	}
 
 	return resp, nil
@@ -86,7 +88,7 @@ func (a *AzureClient) ServicePrincipalOwners(ctx context.Context, id string) (*M
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, ownersURL, nil, resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-azure-infrastrucure: failed to get service principal owners: %w", err)
+		return nil, uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: failed to get service principal owners", err)
 	}
 
 	return resp, nil
@@ -112,7 +114,7 @@ func (a *AzureClient) ServicePrincipalGrantAppRoleAssignment(
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodPost, url, body, nil)
 	if err != nil {
-		return fmt.Errorf("baton-azure-infrastrucure: failed to grant app role assignment to service principal: %w", err)
+		return uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: failed to grant app role assignment to service principal", err)
 	}
 
 	return nil
@@ -127,7 +129,7 @@ func (a *AzureClient) ServicePrincipalDeleteOwner(ctx context.Context, principal
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodDelete, url, nil, nil)
 	if err != nil {
-		return fmt.Errorf("baton-azure-infrastrucure: failed to delete owner from service principal: %w", err)
+		return uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: failed to delete owner from service principal", err)
 	}
 
 	return nil
@@ -142,7 +144,7 @@ func (a *AzureClient) ServicePrincipalDeleteAppRoleAssignedTo(ctx context.Contex
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodDelete, url, nil, nil)
 	if err != nil {
-		return fmt.Errorf("baton-azure-infrastrucure: failed to delete app role assgined: %w", err)
+		return uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: failed to delete app role assigned", err)
 	}
 
 	return nil
@@ -160,7 +162,7 @@ func (a *AzureClient) ListServicePrincipalsManagedIdentity(ctx context.Context, 
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, nextLink, nil, resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-azure-infrastrucure: failed to get service principals managed: %w", err)
+		return nil, uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: failed to get service principals managed identities", err)
 	}
 
 	return resp, nil

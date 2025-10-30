@@ -10,6 +10,9 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"google.golang.org/grpc/codes"
+
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -154,22 +157,22 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	l := ctxzap.Extract(ctx)
 	if principal.Id.ResourceType != userResourceType.Id {
 		l.Warn(
-			"azure-infrastructure-connector: only users can be granted role membership",
+			"baton-azure-infrastructure: only users can be granted role membership",
 			zap.String("principal_type", principal.Id.ResourceType),
 			zap.String("principal_id", principal.Id.Resource),
 		)
 
-		return nil, fmt.Errorf("azure-infrastructure-connector: only users can be granted role membership")
+		return nil, uhttp.WrapErrors(codes.PermissionDenied, "baton-azure-infrastructure: only users can be granted role membership")
 	}
 
 	entitlementResource := entitlement.Resource.Id.Resource
 	if !strings.Contains(entitlementResource, ":") {
-		return nil, fmt.Errorf("invalid role id")
+		return nil, uhttp.WrapErrors(codes.InvalidArgument, "baton-azure-infrastructure: invalid role id")
 	}
 
 	entitlementIDs := strings.Split(entitlement.Resource.Id.Resource, ":")
 	if len(entitlementIDs) != 2 {
-		return nil, fmt.Errorf("invalid role id")
+		return nil, uhttp.WrapErrors(codes.InvalidArgument, "baton-azure-infrastructure: invalid role id")
 	}
 
 	roleId := entitlementIDs[0]
@@ -204,7 +207,7 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 		case errors.As(err, &azureErr):
 			if azureErr.StatusCode == http.StatusConflict {
 				l.Warn(
-					"azure-infrastructure-connector: failed to perform request",
+					"baton-azure-infrastructure: failed to perform request",
 					zap.Int("StatusCode", azureErr.StatusCode),
 					zap.String("ErrorCode", azureErr.ErrorCode),
 					zap.String("ErrorMsg", azureErr.Error()),
@@ -235,22 +238,22 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	entitlement := grant.Entitlement
 	if principal.Id.ResourceType != userResourceType.Id {
 		l.Warn(
-			"azure-infrastructure-connector: only users can have role membership revoked",
+			"baton-azure-infrastructure: only users can have role membership revoked",
 			zap.String("principal_type", principal.Id.ResourceType),
 			zap.String("principal_id", principal.Id.Resource),
 		)
-		return nil, fmt.Errorf("azure-infrastructure-connector: only users can have role membership revoked")
+		return nil, uhttp.WrapErrors(codes.PermissionDenied, "baton-azure-infrastructure: only users can have role membership revoked")
 	}
 
 	principalID := principal.Id.Resource
 	entitlementResource := entitlement.Resource.Id.Resource
 	if !strings.Contains(entitlementResource, ":") {
-		return nil, fmt.Errorf("%s", invalidRoleID)
+		return nil, uhttp.WrapErrors(codes.InvalidArgument, invalidRoleID)
 	}
 
 	entitlementIDs := strings.Split(entitlement.Resource.Id.Resource, ":")
 	if len(entitlementIDs) != 2 {
-		return nil, fmt.Errorf("%s", invalidRoleID)
+		return nil, uhttp.WrapErrors(codes.InvalidArgument, invalidRoleID)
 	}
 
 	// Prepare role assignment parameters
@@ -282,7 +285,7 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	}
 
 	if roleAssignmentResponse.ID == nil {
-		return nil, fmt.Errorf("failed to revoke role assignment %s scope: %s", roleID, scope)
+		return nil, uhttp.WrapErrors(codes.Internal, fmt.Sprintf("baton-azure-infrastructure: failed to revoke role assignment %s scope: %s", roleID, scope))
 	}
 
 	l.Warn("Role assignment successfully revoked.",

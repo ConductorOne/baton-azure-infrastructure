@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
@@ -145,7 +146,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 	})
 
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: failed to get service principal on cache: %w", err)
+		return nil, "", nil, uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: failed to get service principal on cache", err)
 	}
 
 	for _, appRole := range servicePrincipal.AppRoles {
@@ -313,7 +314,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 					return nil, nil
 				}
 			default:
-				return nil, fmt.Errorf("unknown membership type %+v for application owner (id=%s)", gm, objectID)
+				return nil, uhttp.WrapErrors(codes.Internal, fmt.Sprintf("baton-azure-infrastructure: unknown membership type %+v for application owner (id=%s)", gm, objectID))
 			}
 
 			return grant.NewGrant(
@@ -333,7 +334,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 
 		return grants, pageToken, nil, nil
 	default:
-		return nil, "", nil, fmt.Errorf("unknown resource type: %s", ps.ResourceTypeID)
+		return nil, "", nil, uhttp.WrapErrors(codes.InvalidArgument, fmt.Sprintf("unknown resource type: %s", ps.ResourceTypeID))
 	}
 }
 
@@ -373,7 +374,7 @@ func (id *enterpriseApplicationsEntitlementId) MarshalString() (string, error) {
 			},
 			":"), nil
 	default:
-		return "", fmt.Errorf("unknown entitlement type: %s", id.Type)
+		return "", uhttp.WrapErrors(codes.InvalidArgument, fmt.Sprintf("unknown entitlement type: %s", id.Type))
 	}
 }
 
@@ -402,11 +403,11 @@ func (o *enterpriseApplicationsBuilder) Grant(ctx context.Context, principal *v2
 	l := ctxzap.Extract(ctx)
 	if principal.Id.ResourceType != userResourceType.Id {
 		l.Warn(
-			"baton-microsoft-entra: only users can be granted enterprise app entitlements",
+			"baton-azure-infrastructure: only users can be granted enterprise app entitlements",
 			zap.String("principal_type", principal.Id.ResourceType),
 			zap.String("principal_id", principal.Id.Resource),
 		)
-		return nil, errors.New("baton-microsoft-entra: only users can be granted enterprise app entitlements")
+		return nil, uhttp.WrapErrors(codes.PermissionDenied, "baton-azure-infrastructure: only users can be granted enterprise app entitlements")
 	}
 
 	resourceID := entitlement.Resource.Id.Resource
@@ -428,7 +429,10 @@ func (o *enterpriseApplicationsBuilder) Grant(ctx context.Context, principal *v2
 			return nil, err
 		}
 	default:
-		return nil, fmt.Errorf("baton-microsoft-entra: only can provision app roles or owners entitlements to an enterprise application, got %s", eaEntId.Type)
+		return nil, uhttp.WrapErrors(
+			codes.InvalidArgument,
+			fmt.Sprintf("baton-azure-infrastructure: only can provision app roles or owners entitlements to an enterprise application, got %s", eaEntId.Type),
+		)
 	}
 
 	return nil, nil
@@ -462,7 +466,7 @@ func (o *enterpriseApplicationsBuilder) Revoke(ctx context.Context, grant *v2.Gr
 		}
 
 		if roleAssignment == nil {
-			return nil, fmt.Errorf("baton-azure-infrastructure: app role assignment not found for role id %s", grant.Principal.Id.Resource)
+			return nil, uhttp.WrapErrors(codes.NotFound, fmt.Sprintf("baton-azure-infrastructure: app role assignment not found for role id %s", grant.Principal.Id.Resource))
 		}
 
 		err = o.client.ServicePrincipalDeleteAppRoleAssignedTo(ctx, resourceID, roleAssignment.Id)
@@ -471,10 +475,13 @@ func (o *enterpriseApplicationsBuilder) Revoke(ctx context.Context, grant *v2.Gr
 		}
 	default:
 		l.Warn(
-			"baton-microsoft-entra: only can revoke app roles or owners entitlements to an enterprise application",
+			"baton-azure-infrastructure: only can revoke app roles or owners entitlements to an enterprise application",
 			zap.String("entitlement_id", grant.Entitlement.Id),
 		)
-		return nil, errors.New("baton-microsoft-entra: only can revoke app roles or owners entitlements to an enterprise application")
+		return nil, uhttp.WrapErrors(
+			codes.PermissionDenied,
+			"baton-azure-infrastructure: only can revoke app roles or owners entitlements to an enterprise application",
+		)
 	}
 
 	return nil, nil

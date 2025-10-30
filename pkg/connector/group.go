@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -119,7 +120,7 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 	case typeMembers:
 		memberShip, err = g.client.GroupMembers(ctx, groupId, ps.Token)
 	default:
-		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: unknown resource type ID %s", ps.ResourceTypeID)
+		return nil, "", nil, uhttp.WrapErrors(codes.InvalidArgument, fmt.Sprintf("baton-azure-infrastructure: unknown resource type ID %s", ps.ResourceTypeID))
 	}
 
 	if err != nil {

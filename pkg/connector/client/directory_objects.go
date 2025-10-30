@@ -2,8 +2,10 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"net/http"
+
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"google.golang.org/grpc/codes"
 )
 
 // ServicePrincipalAddOwner adds an owner to a service principal
@@ -21,7 +23,7 @@ func (a *AzureClient) ServicePrincipalAddOwner(ctx context.Context, servicePrinc
 
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodPost, url, body, nil)
 	if err != nil {
-		return fmt.Errorf("baton-azure-infrastrucure: failed to add owner to service principal: %w", err)
+		return uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: failed to add owner to service principal", err)
 	}
 
 	return nil

@@ -259,7 +259,7 @@ func parseEntitlementID(id string) (*v2.ResourceId, []string, error) {
 	parts := strings.Split(id, ":")
 	// Need to be at least 3 parts type:entitlement_id:slug
 	if len(parts) < 4 || len(parts) > 4 {
-		return nil, nil, fmt.Errorf("azure-infrastructure-connector: invalid resource id")
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: invalid resource id")
 	}
 
 	resourceId := &v2.ResourceId{
@@ -274,7 +274,7 @@ func parseRoleAssignmentEntitlementID(id string) (*v2.ResourceId, []string, erro
 	parts := strings.Split(id, ":")
 	// Need to be at least 3 parts type:entitlement_id:slug
 	if len(parts) < 4 || len(parts) > 5 {
-		return nil, nil, fmt.Errorf("azure-infrastructure-connector: invalid resource id")
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: invalid resource id")
 	}
 
 	resourceId := &v2.ResourceId{

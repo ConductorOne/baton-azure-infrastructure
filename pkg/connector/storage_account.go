@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -38,7 +39,7 @@ func (usr *storageAccountBuilder) List(ctx context.Context, parentResourceID *v2
 	}
 
 	if parentResourceID.ResourceType != subscriptionsResourceType.Id {
-		return nil, "", nil, fmt.Errorf("parentResourceID.ResourceType is not supported: %s", parentResourceID.ResourceType)
+		return nil, "", nil, uhttp.WrapErrors(codes.InvalidArgument, fmt.Sprintf("baton-azure-infrastructure: parentResourceID.ResourceType is not supported: %s", parentResourceID.ResourceType))
 	}
 
 	factory, err := armstorage.NewClientFactory(
@@ -252,7 +253,7 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 			}
 
 			if privilegedAccess == nil {
-				return nil, "", nil, fmt.Errorf("privileged access not found for scope %s", storageResourceIDs.AzureId())
+				return nil, "", nil, uhttp.WrapErrors(codes.NotFound, fmt.Sprintf("baton-azure-infrastructure: privileged access not found for scope %s", storageResourceIDs.AzureId()))
 			}
 
 			privilegedId = privilegedAccess.Id
@@ -286,7 +287,7 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 		grants = append(grants, grantsResponse...)
 
 	default:
-		return nil, "", nil, fmt.Errorf("unknown state: %s", state.State)
+		return nil, "", nil, uhttp.WrapErrors(codes.InvalidArgument, fmt.Sprintf("baton-azure-infrastructure: unknown state: %s", state.State))
 	}
 
 	nextToken, err := bag.Marshal()

@@ -2,10 +2,12 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"google.golang.org/grpc/codes"
 )
 
 var groupFields = []string{
@@ -43,7 +45,7 @@ func (a *AzureClient) Groups(ctx context.Context, nextLink string) (*GroupsList,
 	resp := &GroupsList{}
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-azure-infrastructure: error fetching groups: %w", err)
+		return nil, uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: error fetching groups", err)
 	}
 
 	return resp, nil
@@ -69,7 +71,7 @@ func (a *AzureClient) GroupOwners(ctx context.Context, groupId string) (*Members
 	resp := &MembershipList{}
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-azure-infrastructure: error fetching groups owners: %w", err)
+		return nil, uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: error fetching group owners", err)
 	}
 
 	return resp, nil
@@ -107,7 +109,7 @@ func (a *AzureClient) GroupMembers(ctx context.Context, groupId string, nextLink
 	resp := &MembershipList{}
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, reqURL, nil, resp)
 	if err != nil {
-		return nil, fmt.Errorf("baton-azure-infrastructure: error fetching groups owners: %w", err)
+		return nil, uhttp.WrapErrors(codes.Unavailable, "baton-azure-infrastructure: error fetching group members", err)
 	}
 
 	return resp, nil
