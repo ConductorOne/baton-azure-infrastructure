@@ -139,27 +139,35 @@ Usage:
 Available Commands:
   capabilities       Get connector capabilities
   completion         Generate the autocompletion script for the specified shell
+  config             Get the connector config schema
   help               Help about any command
 
 Flags:
-      --azure-client-id string                         Azure Client ID ($BATON_AZURE_CLIENT_ID)
-      --azure-client-secret string                     Azure Client Secret ($BATON_AZURE_CLIENT_SECRET)
-      --azure-tenant-id string                         Azure Tenant ID ($BATON_AZURE_TENANT_ID)
-      --client-id string                               The client ID used to authenticate with ConductorOne ($BATON_CLIENT_ID)
-      --client-secret string                           The client secret used to authenticate with ConductorOne ($BATON_CLIENT_SECRET)
-      --enable-sync-external-resources-via-baton-id    If true, the connector will use baton id to sync users, groups, and managed identities from external resources. This could break the sync if the Baton ID external resource is not set up correctly. ($BATON_ENABLE_SYNC_EXTERNAL_RESOURCES_VIA_BATON_ID)
-  -f, --file string                                    The path to the c1z file to sync with ($BATON_FILE) (default "sync.c1z")
-  -h, --help                                           help for baton-azure-infrastructure
-      --log-format string                              The output format for logs: json, console ($BATON_LOG_FORMAT) (default "json")
-      --log-level string                               The log level: debug, info, warn, error ($BATON_LOG_LEVEL) (default "info")
-      --mailboxSettings                                If true, attempt to get mailbox settings for users to determine user purpose ($BATON_MAILBOXSETTINGS)
-  -p, --provisioning                                   This must be set in order for provisioning actions to be enabled ($BATON_PROVISIONING)
-      --skip-ad-groups                                 If true, skip syncing Windows Server Active Directory groups ($BATON_SKIP_AD_GROUPS)
-      --skip-full-sync                                 This must be set to skip a full sync ($BATON_SKIP_FULL_SYNC)
-      --skip-entra-id-p2-license-features              This must be set for the connector to work when not having the proper 'Microsoft Entra ID P2' or 'Microsoft Entra ID Governance' license on the tenant.
-      --ticketing                                      This must be set to enable ticketing support ($BATON_TICKETING)
-      --use-cli-credentials                            If true, uses the az cli to auth ($BATON_USE_CLI_CREDENTIALS)
-  -v, --version                                        version for baton-azure-infrastructure
+      --azure-client-id string                           Azure Client ID ($BATON_AZURE_CLIENT_ID)
+      --azure-client-secret string                       Azure Client Secret ($BATON_AZURE_CLIENT_SECRET)
+      --azure-tenant-id string                           Azure Tenant ID ($BATON_AZURE_TENANT_ID)
+      --client-id string                                 The client ID used to authenticate with ConductorOne ($BATON_CLIENT_ID)
+      --client-secret string                             The client secret used to authenticate with ConductorOne ($BATON_CLIENT_SECRET)
+      --enable-sync-external-resources-via-baton-id      If true, the connector will use baton id to sync users and groups from external resources.
+                                                         		 This could break the sync if the Baton ID external resource is not set up correctly. ($BATON_ENABLE_SYNC_EXTERNAL_RESOURCES_VIA_BATON_ID)
+      --external-resource-c1z string                     The path to the c1z file to sync external baton resources with ($BATON_EXTERNAL_RESOURCE_C1Z)
+      --external-resource-entitlement-id-filter string   The entitlement that external users, groups must have access to sync external baton resources ($BATON_EXTERNAL_RESOURCE_ENTITLEMENT_ID_FILTER)
+  -f, --file string                                      The path to the c1z file to sync with ($BATON_FILE) (default "sync.c1z")
+      --graph-domain string                              Domain for Microsoft Graph API ($BATON_GRAPH_DOMAIN) (default "graph.microsoft.com")
+  -h, --help                                             help for baton-azure-infrastructure
+      --log-format string                                The output format for logs: json, console ($BATON_LOG_FORMAT) (default "json")
+      --log-level string                                 The log level: debug, info, warn, error ($BATON_LOG_LEVEL) (default "info")
+      --mailboxSettings                                  If true, attempt to get mailbox settings for users to determine user purpose ($BATON_MAILBOXSETTINGS)
+      --otel-collector-endpoint string                   The endpoint of the OpenTelemetry collector to send observability data to (used for both tracing and logging if specific endpoints are not provided) ($BATON_OTEL_COLLECTOR_ENDPOINT)
+  -p, --provisioning                                     This must be set in order for provisioning actions to be enabled ($BATON_PROVISIONING)
+      --skip-ad-groups                                   If true, skip syncing Windows Server Active Directory groups ($BATON_SKIP_AD_GROUPS)
+      --skip-entra-id-p2-license-features                If true, skips the features that require a 'Microsoft Entra ID P2' or 'Microsoft Entra ID Governance' license on the tenant. ($BATON_SKIP_ENTRA_ID_P2_LICENSE_FEATURES)
+      --skip-full-sync                                   This must be set to skip a full sync ($BATON_SKIP_FULL_SYNC)
+      --skip-sync-storage-containers                     If true, storage containers is skipped ($BATON_SKIP_SYNC_STORAGE_CONTAINERS)
+      --skip-unused-roles                                Skip unused roles ($BATON_SKIP_UNUSED_ROLES)
+      --ticketing                                        This must be set to enable ticketing support ($BATON_TICKETING)
+      --use-cli-credentials                              If true, uses the az cli to auth ($BATON_USE_CLI_CREDENTIALS)
+  -v, --version                                          version for baton-azure-infrastructure
 
 Use "baton-azure-infrastructure [command] --help" for more information about a command.
 ```
