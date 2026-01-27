@@ -5,106 +5,22 @@ import (
 	"slices"
 	"strings"
 
+	cfg "github.com/conductorone/baton-azure-infrastructure/pkg/config"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
-	"github.com/conductorone/baton-sdk/pkg/field"
 	"github.com/spf13/viper"
 )
 
-var (
-	useCliCredentials = field.BoolField(
-		"use-cli-credentials",
-		field.WithDescription("If true, uses the az cli to auth"),
-	)
-
-	azureClientSecret = field.StringField(
-		"azure-client-secret",
-		field.WithDescription("Azure Client Secret"),
-	)
-
-	azureTenantId = field.StringField(
-		"azure-tenant-id",
-		field.WithDescription("Azure Tenant ID"),
-	)
-
-	azureClientId = field.StringField(
-		"azure-client-id",
-		field.WithDescription("Azure Client ID"),
-	)
-
-	mailboxSettings = field.BoolField(
-		"mailboxSettings",
-		field.WithDescription("If true, attempt to get mailbox settings for users to determine user purpose"),
-	)
-
-	skipAdGroups = field.BoolField(
-		"skip-ad-groups",
-		field.WithDescription("If true, skip syncing Windows Server Active Directory groups"),
-	)
-
-	graphDomain = field.StringField(
-		"graph-domain",
-		field.WithDescription("Domain for Microsoft Graph API"),
-		field.WithDefaultValue("graph.microsoft.com"),
-	)
-
-	skipUnusedRoles = field.BoolField(
-		"skip-unused-roles",
-		field.WithDescription("Skip unused roles"),
-		field.WithDefaultValue(false),
-	)
-
-	skipStorageContainerSync = field.BoolField(
-		"skip-sync-storage-containers",
-		field.WithDescription("If true, storage containers is skipped"),
-		field.WithDefaultValue(false),
-	)
-
-	enableSyncExternalResourcesViaBatonID = field.BoolField(
-		"enable-sync-external-resources-via-baton-id",
-		field.WithDescription(`If true, the connector will use baton id to sync users and groups from external resources.
-		 This could break the sync if the Baton ID external resource is not set up correctly.`),
-		field.WithDefaultValue(false),
-	)
-
-	skipEntraIDP2LicenseFeatures = field.BoolField(
-		"skip-entra-id-p2-license-features",
-		field.WithDescription("If true, skips the features that require a 'Microsoft Entra ID P2' or 'Microsoft Entra ID Governance' license on the tenant."),
-		field.WithDefaultValue(false),
-	)
-)
-
-var ConfigurationFields = []field.SchemaField{
-	useCliCredentials,
-	azureClientSecret,
-	azureTenantId,
-	azureClientId,
-	mailboxSettings,
-	skipAdGroups,
-	graphDomain,
-	skipUnusedRoles,
-	skipStorageContainerSync,
-	enableSyncExternalResourcesViaBatonID,
-	skipEntraIDP2LicenseFeatures,
-}
-
-var FieldRelationships = []field.SchemaFieldRelationship{
-	field.FieldsMutuallyExclusive(useCliCredentials, azureClientId),
-	field.FieldsMutuallyExclusive(useCliCredentials, azureClientSecret),
-}
-
-var cfg = field.NewConfiguration(ConfigurationFields, field.WithConstraints(FieldRelationships...))
-
 // ValidateConfig is run after the configuration is loaded, and should return an error if it isn't valid.
 func ValidateConfig(v *viper.Viper) error {
-	useCliCredentials := v.GetBool(useCliCredentials.FieldName)
-	azureClientSecret := v.GetString(azureClientSecret.FieldName)
-	azureClientId := v.GetString(azureClientId.FieldName)
+	useCliCredentials := v.GetBool(cfg.UseCliCredentialsField.FieldName)
+	azureClientSecret := v.GetString(cfg.AzureClientSecretField.FieldName)
+	azureClientId := v.GetString(cfg.AzureClientIdField.FieldName)
 	if useCliCredentials && (azureClientSecret != "" || azureClientId != "") {
 		return fmt.Errorf("use-cli-credentials and azure-client-secret/azure-client-id are mutually exclusive")
 	}
 
-	host := v.GetString(graphDomain.FieldName)
+	host := v.GetString(cfg.GraphDomainField.FieldName)
 
 	if !slices.Contains(client.ValidHosts, host) {
 		return fmt.Errorf(
