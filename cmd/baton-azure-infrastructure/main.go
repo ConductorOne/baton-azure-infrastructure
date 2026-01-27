@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/conductorone/baton-azure-infrastructure/pkg/connector"
 	cfg "github.com/conductorone/baton-azure-infrastructure/pkg/config"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector"
 	"github.com/conductorone/baton-sdk/pkg/config"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/connectorrunner"
