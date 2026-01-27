@@ -93,7 +93,7 @@ var FieldRelationships = []field.SchemaFieldRelationship{
 	field.FieldsMutuallyExclusive(useCliCredentials, azureClientSecret),
 }
 
-var cfg = field.NewConfiguration(ConfigurationFields, FieldRelationships...)
+var cfg = field.NewConfiguration(ConfigurationFields, field.WithConstraints(FieldRelationships...))
 
 // ValidateConfig is run after the configuration is loaded, and should return an error if it isn't valid.
 func ValidateConfig(v *viper.Viper) error {
