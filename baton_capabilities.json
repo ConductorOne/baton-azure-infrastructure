@@ -1,99 +1,148 @@
 {
-  "@type":  "type.googleapis.com/c1.connector.v2.ConnectorCapabilities",
-  "resourceTypeCapabilities":  [
+  "@type": "type.googleapis.com/c1.connector.v2.ConnectorCapabilities",
+  "resourceTypeCapabilities": [
     {
-      "resourceType":  {
-        "id":  "group",
-        "displayName":  "Group of Azure Infrastructure",
-        "traits":  [
-          "TRAIT_GROUP"
-        ]
-      },
-      "capabilities":  [
-        "CAPABILITY_SYNC",
-        "CAPABILITY_PROVISION"
-      ]
-    },
-    {
-      "resourceType":  {
-        "id":  "managed_identity",
-        "displayName":  "Managed Identity of Azure Infrastructure",
-        "traits":  [
-          "TRAIT_USER"
+      "resourceType": {
+        "id": "container",
+        "displayName": "Container",
+        "traits": [
+          "TRAIT_APP"
         ],
-        "annotations":  [
-          {
-            "@type":  "type.googleapis.com/c1.connector.v2.SkipEntitlementsAndGrants"
-          }
-        ]
+        "description": "Container from Storage Account of Azure Infrastructure"
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
-      ]
+      ],
+      "permissions": {}
     },
     {
-      "resourceType":  {
-        "id":  "resource_group",
-        "displayName":  "Resource Group of Azure Infrastructure",
-        "traits":  [
-          "TRAIT_GROUP"
-        ]
-      },
-      "capabilities":  [
-        "CAPABILITY_SYNC"
-      ]
-    },
-    {
-      "resourceType":  {
-        "id":  "role",
-        "displayName":  "Role",
-        "traits":  [
-          "TRAIT_ROLE"
-        ],
-        "description":  "Role of Azure Infrastructure"
-      },
-      "capabilities":  [
-        "CAPABILITY_SYNC",
-        "CAPABILITY_PROVISION"
-      ]
-    },
-    {
-      "resourceType":  {
-        "id":  "subscription",
-        "displayName":  "Subscription of Azure Infrastructure",
-        "traits":  [
+      "resourceType": {
+        "id": "enterprise_application",
+        "displayName": "Enterprise Application of Azure Infrastructure",
+        "traits": [
           "TRAIT_APP"
         ]
       },
-      "capabilities":  [
-        "CAPABILITY_SYNC"
-      ]
+      "capabilities": [
+        "CAPABILITY_SYNC",
+        "CAPABILITY_PROVISION"
+      ],
+      "permissions": {}
     },
     {
-      "resourceType":  {
-        "id":  "tenant",
-        "displayName":  "Tenant of Azure Infrastructure"
+      "resourceType": {
+        "id": "group",
+        "displayName": "Group of Azure Infrastructure",
+        "traits": [
+          "TRAIT_GROUP"
+        ]
       },
-      "capabilities":  [
-        "CAPABILITY_SYNC"
-      ]
+      "capabilities": [
+        "CAPABILITY_SYNC",
+        "CAPABILITY_PROVISION"
+      ],
+      "permissions": {}
     },
     {
-      "resourceType":  {
-        "id":  "user",
-        "displayName":  "User of Azure Infrastructure",
-        "traits":  [
+      "resourceType": {
+        "id": "managed_identity",
+        "displayName": "Managed Identity of Azure Infrastructure",
+        "traits": [
+          "TRAIT_USER"
+        ],
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlementsAndGrants"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {}
+    },
+    {
+      "resourceType": {
+        "id": "resource_group",
+        "displayName": "Resource Group of Azure Infrastructure",
+        "traits": [
+          "TRAIT_GROUP"
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {}
+    },
+    {
+      "resourceType": {
+        "id": "role",
+        "displayName": "Role",
+        "traits": [
+          "TRAIT_ROLE"
+        ],
+        "description": "Role of Azure Infrastructure"
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC",
+        "CAPABILITY_PROVISION"
+      ],
+      "permissions": {}
+    },
+    {
+      "resourceType": {
+        "id": "storage_account",
+        "displayName": "Storage Account",
+        "traits": [
+          "TRAIT_APP"
+        ],
+        "description": "Storage Account of Azure Infrastructure"
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {}
+    },
+    {
+      "resourceType": {
+        "id": "subscription",
+        "displayName": "Subscription of Azure Infrastructure",
+        "traits": [
+          "TRAIT_APP"
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {}
+    },
+    {
+      "resourceType": {
+        "id": "tenant",
+        "displayName": "Tenant of Azure Infrastructure"
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {}
+    },
+    {
+      "resourceType": {
+        "id": "user",
+        "displayName": "User of Azure Infrastructure",
+        "traits": [
           "TRAIT_USER"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
-      ]
+      ],
+      "permissions": {}
     }
   ],
-  "connectorCapabilities":  [
+  "connectorCapabilities": [
     "CAPABILITY_PROVISION",
     "CAPABILITY_SYNC"
   ],
-  "credentialDetails":  {}
+  "credentialDetails": {}
 }
