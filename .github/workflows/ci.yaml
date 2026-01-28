@@ -1,15 +1,20 @@
 name: ci
-on: pull_request
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  push:
+    branches:
+      - main
 jobs:
   go-lint:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.23.x
-      - name: Checkout code
-        uses: actions/checkout@v4
+          go-version-file: 'go.mod'
       - name: Run linters
         uses: golangci/golangci-lint-action@v8
         with:
@@ -18,25 +23,22 @@ jobs:
   go-test:
     strategy:
       matrix:
-        go-version: [1.23.x]
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
-      - name: Install Go
-        if: success()
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go-version }}
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
       - name: go tests
-        run: (set -o pipefail && go test -v -covermode=count -json ./... | tee test.json)
+        run: go test -v -covermode=count -json ./... > test.json
       - name: annotate go tests
         if: always()
-        uses: guyarb/golang-test-annotations@v0.5.1
+        uses: guyarb/golang-test-annotations@v0.6.0
         with:
           test-results: test.json
-
   test:
     runs-on: ubuntu-latest
     env:
@@ -50,48 +52,15 @@ jobs:
       BATON_PRINCIPAL: "5f571df9-a726-4815-947d-32e73e96908d"
       BATON_PRINCIPAL_TYPE: "user"
     steps:
-      - name: Install Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: 1.23.x
-
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
       - name: Build baton-azure-infrastructure
         run: go build ./cmd/baton-azure-infrastructure
       - name: Run baton-azure-infrastructure
         run: ./baton-azure-infrastructure
       - name: Install baton
         run: ./scripts/get-baton.sh && mv baton /usr/local/bin
-
-        # NOTE: need to make CI work with appRoleAssignment, this id will change every time is granted
-
-      # - name: Check for grant before revoking
-      #   run: |
-      #     baton grants --entitlement="${{ env.BATON_ENTITLEMENT }}" --output-format=json | \
-      #     jq --exit-status ".grants[].principal.id.resource == \"${{ env.BATON_PRINCIPAL }}\"" |\
-      #     grep -q true
-      #
-      # - name: Revoke grants
-      #   run: ./baton-azure-infrastructure --revoke-grant="${{ env.BATON_GRANT }}"
-      #
-      # - name: Check grant was revoked
-      #   run: |
-      #     ./baton-azure-infrastructure && \
-      #     baton grants --entitlement="${{ env.BATON_ENTITLEMENT }}" --output-format=json | \
-      #     jq --exit-status "if .grants then .grants[]?.principal.id.resource != \"${{ env.BATON_PRINCIPAL }}\" else . end" |\
-      #     grep -v -q true
-      #
-      # - name: Grant entitlement
-      #   run: |
-      #     ./baton-azure-infrastructure --grant-entitlement="${{ env.BATON_ENTITLEMENT }}" \
-      #                     --grant-principal="${{ env.BATON_PRINCIPAL }}" \
-      #                     --grant-principal-type="${{ env.BATON_PRINCIPAL_TYPE }}"
-      #
-      # - name: Check grant was re-granted
-      #   run: |
-      #     ./baton-azure-infrastructure && \
-      #     baton grants --entitlement="${{ env.BATON_ENTITLEMENT }}" --output-format=json | \
-      #     jq --exit-status ".grants[].principal.id.resource == \"${{ env.BATON_PRINCIPAL }}\"" |\
-      #     grep -q true
-      #

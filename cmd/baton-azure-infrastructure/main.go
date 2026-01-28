@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"os"
 
+	cfg "github.com/conductorone/baton-azure-infrastructure/pkg/config"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector"
 	"github.com/conductorone/baton-sdk/pkg/config"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/conductorone/baton-sdk/pkg/connectorrunner"
 	"github.com/conductorone/baton-sdk/pkg/types"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
@@ -18,7 +19,9 @@ var version = "dev"
 
 func main() {
 	ctx := context.Background()
-	_, cmd, err := config.DefineConfiguration(ctx, "baton-azure-infrastructure", getConnector, cfg)
+	_, cmd, err := config.DefineConfiguration(ctx, "baton-azure-infrastructure", getConnector, cfg.Config,
+		connectorrunner.WithDefaultCapabilitiesConnectorBuilder(&connector.Connector{}),
+	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
@@ -33,37 +36,25 @@ func main() {
 	}
 }
 
-func getConnector(ctx context.Context, v *viper.Viper) (types.ConnectorServer, error) {
+func getConnector(ctx context.Context, ac *cfg.AzureInfrastructure) (types.ConnectorServer, error) {
 	l := ctxzap.Extract(ctx)
-	if err := ValidateConfig(v); err != nil {
+	if err := cfg.ValidateConfig(ac); err != nil {
 		return nil, err
 	}
 
-	useCliCredentials := v.GetBool(useCliCredentials.FieldName)
-	azureTenantId := v.GetString(azureTenantId.FieldName)
-	azureClientSecret := v.GetString(azureClientSecret.FieldName)
-	azureClientId := v.GetString(azureClientId.FieldName)
-	mailboxSettings := v.GetBool(mailboxSettings.FieldName)
-	skipAdGroups := v.GetBool(skipAdGroups.FieldName)
-	graphDomain := v.GetString(graphDomain.FieldName)
-	skipUnusedRoles := v.GetBool(skipUnusedRoles.FieldName)
-	skipStorageContainerSync := v.GetBool(skipStorageContainerSync.FieldName)
-	enableSyncExternalResourcesViaBatonID := v.GetBool(enableSyncExternalResourcesViaBatonID.FieldName)
-	skipEntraIDP2LicenseFeatures := v.GetBool(skipEntraIDP2LicenseFeatures.FieldName)
-
 	cb, err := connector.New(
 		ctx,
-		useCliCredentials,
-		azureTenantId,
-		azureClientId,
-		azureClientSecret,
-		mailboxSettings,
-		skipAdGroups,
-		graphDomain,
-		skipUnusedRoles,
-		skipStorageContainerSync,
-		enableSyncExternalResourcesViaBatonID,
-		skipEntraIDP2LicenseFeatures,
+		ac.UseCliCredentials,
+		ac.AzureTenantId,
+		ac.AzureClientId,
+		ac.AzureClientSecret,
+		ac.Mailboxsettings,
+		ac.SkipAdGroups,
+		ac.GraphDomain,
+		ac.SkipUnusedRoles,
+		ac.SkipSyncStorageContainers,
+		ac.EnableSyncExternalResourcesViaBatonId,
+		ac.SkipEntraIdP2LicenseFeatures,
 	)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
