@@ -5,8 +5,10 @@ import (
 	"io"
 	"net/http"
 
+	cfg "github.com/conductorone/baton-azure-infrastructure/pkg/config"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/cli"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
 
@@ -66,6 +68,7 @@ func (d *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 // Validate is called to ensure that the connector is properly configured. It should exercise any API credentials
 // to be sure that they are valid.
 func (d *Connector) Validate(ctx context.Context) (annotations.Annotations, error) {
+	// Add any validation logic here if needed
 	return nil, nil
 }
 
@@ -116,17 +119,13 @@ func NewConnectorFromToken(
 }
 
 // New returns a new instance of the connector.
-func New(
-	ctx context.Context,
-	useCliCredentials bool,
-	tenantID,
-	clientID,
-	clientSecret string,
-	mailboxSettings bool,
-	skipAdGroups bool,
-	graphDomain string,
-	skipUnusedRoles bool,
-) (*Connector, error) {
+func New(ctx context.Context, config *cfg.AzureInfrastructure, opts *cli.ConnectorOpts) (connectorbuilder.ConnectorBuilderV2, []connectorbuilder.Opt, error) {
+	// Validate config
+	err := cfg.ValidateConfig(config)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	var cred azcore.TokenCredential
 	httpClient, err := uhttp.NewClient(
 		ctx,
@@ -135,16 +134,17 @@ func New(
 		}...,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	switch {
-	case useCliCredentials:
+	case config.UseCliCredentials:
 		cred, err = azidentity.NewAzureCLICredential(nil)
-	case !IsEmpty(tenantID) && !IsEmpty(clientID) && !IsEmpty(clientSecret):
-		cred, err = azidentity.NewClientSecretCredential(tenantID,
-			clientID,
-			clientSecret,
+	case !IsEmpty(config.AzureTenantId) && !IsEmpty(config.AzureClientId) && !IsEmpty(config.AzureClientSecret):
+		cred, err = azidentity.NewClientSecretCredential(
+			config.AzureTenantId,
+			config.AzureClientId,
+			config.AzureClientSecret,
 			&azidentity.ClientSecretCredentialOptions{
 				ClientOptions: azcore.ClientOptions{
 					Transport: httpClient,
@@ -155,20 +155,25 @@ func New(
 			ClientOptions: azcore.ClientOptions{
 				Transport: httpClient,
 			},
-			TenantID: tenantID,
+			TenantID: config.AzureTenantId,
 		})
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return NewConnectorFromToken(
+	connector, err := NewConnectorFromToken(
 		ctx,
 		httpClient,
 		cred,
-		mailboxSettings,
-		skipAdGroups,
-		graphDomain,
-		skipUnusedRoles,
+		config.Mailboxsettings,
+		config.SkipAdGroups,
+		config.GraphDomain,
+		config.SkipUnusedRoles,
 	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return connector, nil, nil
 }
