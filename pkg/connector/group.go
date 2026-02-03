@@ -12,8 +12,8 @@ import (
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
+	resource "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	zap "go.uber.org/zap"
 )
@@ -40,48 +40,48 @@ func (g *groupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return groupResourceType
 }
 
-func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	resp, err := g.client.Groups(ctx, pToken.Token)
+func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, attrs resource.SyncOpAttrs) ([]*v2.Resource, *resource.SyncOpResults, error) {
+	resp, err := g.client.Groups(ctx, attrs.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	groups, err := ConvertErr(resp.Groups, func(g *client.Group) (*v2.Resource, error) {
 		return groupResource(ctx, g, parentResourceID)
 	})
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
-	return groups, resp.NextLink, nil, nil
+	return groups, &resource.SyncOpResults{NextPageToken: resp.NextLink}, nil
 }
 
 // Entitlements always returns an empty slice for users.
-func (g *groupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (g *groupBuilder) Entitlements(_ context.Context, res *v2.Resource, _ resource.SyncOpAttrs) ([]*v2.Entitlement, *resource.SyncOpResults, error) {
 	var rv []*v2.Entitlement
 	options := []ent.EntitlementOption{
-		ent.WithDisplayName(fmt.Sprintf("%s Group Owner", resource.DisplayName)),
-		ent.WithDescription(fmt.Sprintf("Owner of %s group", resource.DisplayName)),
+		ent.WithDisplayName(fmt.Sprintf("%s Group Owner", res.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("Owner of %s group", res.DisplayName)),
 		ent.WithGrantableTo(userResourceType),
 	}
-	rv = append(rv, ent.NewPermissionEntitlement(resource, typeOwners, options...))
+	rv = append(rv, ent.NewPermissionEntitlement(res, typeOwners, options...))
 
 	options = []ent.EntitlementOption{
-		ent.WithDisplayName(fmt.Sprintf("%s Group Member", resource.DisplayName)),
-		ent.WithDescription(fmt.Sprintf("Member of %s group", resource.DisplayName)),
+		ent.WithDisplayName(fmt.Sprintf("%s Group Member", res.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("Member of %s group", res.DisplayName)),
 		ent.WithGrantableTo(userResourceType, groupResourceType),
 	}
-	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeMembers, options...))
+	rv = append(rv, ent.NewAssignmentEntitlement(res, typeMembers, options...))
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
-func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (g *groupBuilder) Grants(ctx context.Context, res *v2.Resource, attrs resource.SyncOpAttrs) ([]*v2.Grant, *resource.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
-	b := &pagination.Bag{}
-	err := b.Unmarshal(pToken.Token)
+	b := &resource.PaginationBag{}
+	err := b.Unmarshal(attrs.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	// NOTE: We use the Beta URL here because in the v1.0 docs there is this note (last checked December 2024)
@@ -96,21 +96,21 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 	//
 	// NOTE #2: This applies to both the members and owners endpoints.
 	if b.Current() == nil {
-		b.Push(pagination.PageState{
+		b.Push(resource.PageState{
 			ResourceTypeID: typeOwners,
 		})
 
-		b.Push(pagination.PageState{
+		b.Push(resource.PageState{
 			ResourceTypeID: typeMembers,
 		})
 	}
 
 	ps := b.Pop()
 	if ps == nil {
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 
-	groupId := resource.Id.Resource
+	groupId := res.Id.Resource
 	var memberShip *client.MembershipList
 
 	switch ps.ResourceTypeID {
@@ -119,7 +119,7 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 	case typeMembers:
 		memberShip, err = g.client.GroupMembers(ctx, groupId, ps.Token)
 	default:
-		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: unknown resource type ID %s", ps.ResourceTypeID)
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: unknown resource type ID %s", ps.ResourceTypeID)
 	}
 
 	if err != nil {
@@ -130,10 +130,10 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 				zap.String("group_id", groupId),
 				zap.Error(err),
 			)
-			return nil, "", nil, nil
+			return nil, nil, nil
 		}
 
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	// dubious hack: if we get less than 50 members,
@@ -145,24 +145,24 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 	}
 
 	if memberShip.NextLink != "" {
-		b.Push(pagination.PageState{
+		b.Push(resource.PageState{
 			ResourceTypeID: ps.ResourceTypeID,
 			ResourceID:     ps.ResourceID,
 			Token:          memberShip.NextLink,
 		})
 	}
 
-	grants, err := getGroupGrants(ctx, memberShip, resource, ps)
+	grants, err := getGroupGrants(ctx, memberShip, res, ps)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	nextToken, err := b.Marshal()
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
-	return grants, nextToken, nil, nil
+	return grants, &resource.SyncOpResults{NextPageToken: nextToken}, nil
 }
 
 func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {

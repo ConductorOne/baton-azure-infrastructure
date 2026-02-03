@@ -11,8 +11,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	resource "github.com/conductorone/baton-sdk/pkg/types/resource"
 )
 
@@ -27,10 +25,10 @@ func (usr *userBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 
 // List returns all the users from the database as resource objects.
 // Users include a UserTrait because they are the 'shape' of a standard user.
-func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	resp, err := usr.client.Users(ctx, pToken.Token)
+func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, attrs resource.SyncOpAttrs) ([]*v2.Resource, *resource.SyncOpResults, error) {
+	resp, err := usr.client.Users(ctx, attrs.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	// If mailboxSettings is disabled, we can return the users without checking mailboxSettings.
@@ -39,10 +37,10 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 			return userResource(ctx, user, parentResourceID)
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
-		return users, resp.NextLink, nil, nil
+		return users, &resource.SyncOpResults{NextPageToken: resp.NextLink}, nil
 	}
 
 	var userResources []*v2.Resource
@@ -56,7 +54,7 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 				l.Debug("UserMailboxSetting: user not found", zap.String("user_id", ur.ID), zap.Error(err))
 				continue
 			}
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		userPurpose := strings.ToLower(mailboxSettingsResp.UserPurpose)
@@ -68,23 +66,23 @@ func (usr *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 
 		userResource, err := userResource(ctx, ur, parentResourceID, userAccountType)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		userResources = append(userResources, userResource)
 	}
 
-	return userResources, resp.NextLink, nil, nil
+	return userResources, &resource.SyncOpResults{NextPageToken: resp.NextLink}, nil
 }
 
 // Entitlements always returns an empty slice for users.
-func (usr *userBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (usr *userBuilder) Entitlements(_ context.Context, _ *v2.Resource, _ resource.SyncOpAttrs) ([]*v2.Entitlement, *resource.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 // Grants always returns an empty slice for users since they don't have any entitlements.
-func (usr *userBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (usr *userBuilder) Grants(ctx context.Context, _ *v2.Resource, _ resource.SyncOpAttrs) ([]*v2.Grant, *resource.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 func newUserBuilder(conn *Connector) *userBuilder {

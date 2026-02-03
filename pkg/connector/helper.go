@@ -23,7 +23,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	expSlices "golang.org/x/exp/slices"
 )
@@ -112,15 +111,15 @@ func userURL(u *client.User) string {
 	}).String()
 }
 
-func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, error) {
-	b := &pagination.Bag{}
+func parsePageToken(i string, resourceID *v2.ResourceId) (*rs.PaginationBag, error) {
+	b := &rs.PaginationBag{}
 	err := b.Unmarshal(i)
 	if err != nil {
 		return nil, err
 	}
 
 	if b.Current() == nil {
-		b.Push(pagination.PageState{
+		b.Push(rs.PageState{
 			ResourceTypeID: resourceID.ResourceType,
 			ResourceID:     resourceID.Resource,
 		})
@@ -239,7 +238,7 @@ func fmtResourceGrant(resourceID *v2.ResourceId, principalId *v2.ResourceId, per
 	)
 }
 
-func getGroupGrants(ctx context.Context, resp *client.MembershipList, resource *v2.Resource, ps *pagination.PageState) ([]*v2.Grant, error) {
+func getGroupGrants(ctx context.Context, resp *client.MembershipList, resource *v2.Resource, ps *rs.PageState) ([]*v2.Grant, error) {
 	grants, err := ConvertErr(resp.Members, func(gm *client.Membership) (*v2.Grant, error) {
 		var annos annotations.Annotations
 		objectID := resource.Id.GetResource()

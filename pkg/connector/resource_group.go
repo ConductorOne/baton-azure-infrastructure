@@ -5,8 +5,7 @@ import (
 
 	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
+	resource "github.com/conductorone/baton-sdk/pkg/types/resource"
 )
 
 type resourceGroupBuilder struct {
@@ -17,9 +16,9 @@ func (rg *resourceGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceTy
 	return resourceGroupResourceType
 }
 
-func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, attrs resource.SyncOpAttrs) ([]*v2.Resource, *resource.SyncOpResults, error) {
 	if parentResourceID == nil {
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 
 	var rv []*v2.Resource
@@ -31,13 +30,13 @@ func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.R
 		rg.conn.client.ArmOptions(),
 	)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	for pager := client.NewListPager(nil); pager.More(); {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		// NOTE: The service desides how many items to return on a page.
@@ -52,22 +51,22 @@ func (rg *resourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.R
 					Resource:     StringValue(&subscriptionID),
 				})
 			if err != nil {
-				return nil, "", nil, err
+				return nil, nil, err
 			}
 
 			rv = append(rv, gr)
 		}
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
-func (rg *resourceGroupBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (rg *resourceGroupBuilder) Entitlements(ctx context.Context, _ *v2.Resource, _ resource.SyncOpAttrs) ([]*v2.Entitlement, *resource.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
-func (rg *resourceGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (rg *resourceGroupBuilder) Grants(ctx context.Context, _ *v2.Resource, _ resource.SyncOpAttrs) ([]*v2.Grant, *resource.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 func newResourceGroupBuilder(c *Connector) *resourceGroupBuilder {

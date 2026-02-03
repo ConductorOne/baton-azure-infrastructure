@@ -35,8 +35,8 @@ type Connector struct {
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
-func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers := []connectorbuilder.ResourceSyncer{
+func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncerV2 {
+	syncers := []connectorbuilder.ResourceSyncerV2{
 		newUserBuilder(d),
 		newGroupBuilder(d),
 		newSubscriptionBuilder(d),

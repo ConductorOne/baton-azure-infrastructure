@@ -10,14 +10,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
+	resource "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 )
@@ -41,17 +41,17 @@ func (e *enterpriseApplicationsBuilder) ResourceType(ctx context.Context) *v2.Re
 	return enterpriseApplicationResourceType
 }
 
-func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
+func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, attrs resource.SyncOpAttrs) ([]*v2.Resource, *resource.SyncOpResults, error) {
+	bag, err := parsePageToken(attrs.PageToken.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	reqURL := bag.PageToken()
 
 	resp, err := e.client.ListServicePrincipals(ctx, reqURL)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	var applicationsOwned []*client.ServicePrincipal
@@ -68,7 +68,7 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 	for i, app := range applicationsOwned {
 		value, err := enterpriseApplicationResource(ctx, app, parentResourceID)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		resources[i] = value
@@ -76,13 +76,13 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 
 	pageToken, err := bag.NextToken(resp.NextLink)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
-	return resources, pageToken, nil, nil
+	return resources, &resource.SyncOpResults{NextPageToken: pageToken}, nil
 }
 
-func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, res *v2.Resource, _ resource.SyncOpAttrs) ([]*v2.Entitlement, *resource.SyncOpResults, error) {
 	var err error
 
 	// https://learn.microsoft.com/en-us/graph/api/resources/approleassignment?view=graph-rest-1.0
@@ -95,15 +95,15 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 		ownersEntIdString, err := ownersEntId.MarshalString()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		ent := entitlement.NewPermissionEntitlement(
-			resource,
+			res,
 			ownersEntIdString,
 			entitlement.WithGrantableTo(userResourceType),
-			entitlement.WithDisplayName(fmt.Sprintf("%s Application Owner", resource.DisplayName)),
-			entitlement.WithDescription(fmt.Sprintf("Owner of %s Application", resource.DisplayName)),
+			entitlement.WithDisplayName(fmt.Sprintf("%s Application Owner", res.DisplayName)),
+			entitlement.WithDescription(fmt.Sprintf("Owner of %s Application", res.DisplayName)),
 		)
 		ent.Slug = "owner"
 		rv = append(rv, ent)
@@ -125,27 +125,27 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 		defaultAppRoleAssignmentStringerString, err := defaultAppRoleAssignmentStringer.MarshalString()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		ent := entitlement.NewAssignmentEntitlement(
-			resource,
+			res,
 			defaultAppRoleAssignmentStringerString,
 			entitlement.WithGrantableTo(userResourceType, groupResourceType),
-			entitlement.WithDisplayName(fmt.Sprintf("%s Application Assignment", resource.DisplayName)),
-			entitlement.WithDescription(fmt.Sprintf("Assigned to %s Application", resource.DisplayName)),
+			entitlement.WithDisplayName(fmt.Sprintf("%s Application Assignment", res.DisplayName)),
+			entitlement.WithDescription(fmt.Sprintf("Assigned to %s Application", res.DisplayName)),
 		)
 		ent.Slug = "assigned"
 		rv = append(rv, ent)
 	}
 
-	principalId := resource.Id.Resource
+	principalId := res.Id.Resource
 	servicePrincipal, err := e.cache.GetOrSet(principalId, func() (*client.ServicePrincipal, error) {
 		return e.client.ServicePrincipal(ctx, principalId)
 	})
 
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: failed to get service principal on cache: %w", err)
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: failed to get service principal on cache: %w", err)
 	}
 
 	for _, appRole := range servicePrincipal.AppRoles {
@@ -165,35 +165,35 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 		appRoleAssignmentIdString, err := appRoleAssignmentId.MarshalString()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		ent := entitlement.NewAssignmentEntitlement(
-			resource,
+			res,
 			appRoleAssignmentIdString,
 			entitlement.WithGrantableTo(userResourceType, groupResourceType),
 			entitlement.WithDisplayName(fmt.Sprintf("%s Role Assignment", appRole.DisplayName)),
-			entitlement.WithDescription(fmt.Sprintf("Assigned to %s Application with %s Role", resource.DisplayName, appRole.Description)),
+			entitlement.WithDescription(fmt.Sprintf("Assigned to %s Application with %s Role", res.DisplayName, appRole.Description)),
 		)
 		ent.Slug = slug
 
 		rv = append(rv, ent)
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
-func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, res *v2.Resource, attrs resource.SyncOpAttrs) ([]*v2.Grant, *resource.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 
-	b := &pagination.Bag{}
-	err := b.Unmarshal(pt.Token)
+	b := &resource.PaginationBag{}
+	err := b.Unmarshal(attrs.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	// AzureId relarted to Azure resource
-	principalId := strings.TrimPrefix(resource.Id.Resource, "applications/")
+	principalId := strings.TrimPrefix(res.Id.Resource, "applications/")
 
 	// NOTE: We use the Beta URL here because in the v1.0 docs there is this note (last checked August 2023)
 	//
@@ -207,10 +207,10 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	//
 	// NOTE #2: This applies to both the members and owners endpoints.
 	if b.Current() == nil {
-		b.Push(pagination.PageState{
+		b.Push(resource.PageState{
 			ResourceTypeID: ownersStr,
 		})
-		b.Push(pagination.PageState{
+		b.Push(resource.PageState{
 			ResourceTypeID: assignmentStr,
 		})
 	}
@@ -222,7 +222,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 			return e.client.ServicePrincipal(ctx, principalId)
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		resp := principalResp.AppRolesAssignedTo
@@ -253,7 +253,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 			}
 
 			return grant.NewGrant(
-				resource,
+				res,
 				fmt.Sprintf("assignment:%s",
 					appRoleAssignment.AppRoleId,
 				),
@@ -262,34 +262,34 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 			), nil
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		b.Pop()
 		nextToken, err := b.Marshal()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
-		return grants, nextToken, nil, err
+		return grants, &resource.SyncOpResults{NextPageToken: nextToken}, err
 	case ownersStr:
 		resp, err := e.client.ServicePrincipalOwners(ctx, principalId)
 		if err != nil {
 			if status.Code(err) == codes.NotFound {
 				ctxzap.Extract(ctx).Warn(
 					"app role owner membership not found",
-					zap.String("app_role_assignment_id", resource.Id.GetResource()),
+					zap.String("app_role_assignment_id", res.Id.GetResource()),
 					zap.String("url", ps.Token),
 					zap.Error(err),
 				)
-				return nil, "", nil, nil
+				return nil, nil, nil
 			}
 
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		grants, err := ConvertErr(resp.Members, func(gm *client.Membership) (*v2.Grant, error) {
-			objectID := resource.Id.GetResource()
+			objectID := res.Id.GetResource()
 			rid := &v2.ResourceId{Resource: gm.Id}
 			switch gm.Type {
 			case odataTypeUser:
@@ -317,23 +317,23 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 			}
 
 			return grant.NewGrant(
-				resource,
+				res,
 				"owners",
 				rid,
 			), nil
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		pageToken, err := b.NextToken(resp.NextLink)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
-		return grants, pageToken, nil, nil
+		return grants, &resource.SyncOpResults{NextPageToken: pageToken}, nil
 	default:
-		return nil, "", nil, fmt.Errorf("unknown resource type: %s", ps.ResourceTypeID)
+		return nil, nil, fmt.Errorf("unknown resource type: %s", ps.ResourceTypeID)
 	}
 }
 

@@ -12,9 +12,9 @@ import (
 	armresources "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
+	resource "github.com/conductorone/baton-sdk/pkg/types/resource"
 	uuid "github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -36,30 +36,30 @@ func (ra *roleAssignmentResourceGroupBuilder) ResourceType(ctx context.Context) 
 	return roleAssignmentResourceGroupType
 }
 
-func (ra *roleAssignmentResourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (ra *roleAssignmentResourceGroupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, attrs resource.SyncOpAttrs) ([]*v2.Resource, *resource.SyncOpResults, error) {
 	var rv []*v2.Resource
 	pagerSubscriptions := ra.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
 	for pagerSubscriptions.More() {
 		page, err := pagerSubscriptions.NextPage(ctx)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		for _, subscription := range page.Value {
 			lstRoles, err := getAllRoles(ctx, ra.conn, *subscription.SubscriptionID)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, nil, err
 			}
 
 			client, err := armresources.NewResourceGroupsClient(*subscription.SubscriptionID, ra.conn.token, ra.conn.client.ArmOptions())
 			if err != nil {
-				return nil, "", nil, err
+				return nil, nil, err
 			}
 
 			for pager := client.NewListPager(nil); pager.More(); {
 				page, err := pager.NextPage(ctx)
 				if err != nil {
-					return nil, "", nil, err
+					return nil, nil, err
 				}
 
 				// NOTE: The service decides how many items to return on a page.
@@ -77,7 +77,7 @@ func (ra *roleAssignmentResourceGroupBuilder) List(ctx context.Context, parentRe
 								Resource:     StringValue(subscription.SubscriptionID),
 							})
 						if err != nil {
-							return nil, "", nil, err
+							return nil, nil, err
 						}
 
 						rv = append(rv, gr)
@@ -87,36 +87,36 @@ func (ra *roleAssignmentResourceGroupBuilder) List(ctx context.Context, parentRe
 		}
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
-func (ra *roleAssignmentResourceGroupBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (ra *roleAssignmentResourceGroupBuilder) Entitlements(ctx context.Context, res *v2.Resource, _ resource.SyncOpAttrs) ([]*v2.Entitlement, *resource.SyncOpResults, error) {
 	var rv []*v2.Entitlement
 	options := []ent.EntitlementOption{
-		ent.WithDisplayName(fmt.Sprintf("%s Resource Group Owner", resource.DisplayName)),
-		ent.WithDescription(fmt.Sprintf("Owner of %s resource group", resource.DisplayName)),
+		ent.WithDisplayName(fmt.Sprintf("%s Resource Group Owner", res.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("Owner of %s resource group", res.DisplayName)),
 		ent.WithGrantableTo(userResourceType),
 	}
-	rv = append(rv, ent.NewPermissionEntitlement(resource, typeOwners, options...))
+	rv = append(rv, ent.NewPermissionEntitlement(res, typeOwners, options...))
 
 	options = []ent.EntitlementOption{
-		ent.WithDisplayName(fmt.Sprintf("%s Resource Group Member", resource.DisplayName)),
-		ent.WithDescription(fmt.Sprintf("Assigned to %s resource group", resource.DisplayName)),
+		ent.WithDisplayName(fmt.Sprintf("%s Resource Group Member", res.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("Assigned to %s resource group", res.DisplayName)),
 		ent.WithGrantableTo(userResourceType, groupResourceType),
 	}
-	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeAssigned, options...))
+	rv = append(rv, ent.NewAssignmentEntitlement(res, typeAssigned, options...))
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
-func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, res *v2.Resource, attrs resource.SyncOpAttrs) ([]*v2.Grant, *resource.SyncOpResults, error) {
 	var (
 		rv                                        []*v2.Grant
 		gr                                        *v2.Grant
 		principalId                               *v2.ResourceId
 		subscriptionID, resourceGroupName, roleID string
 	)
-	arr := strings.Split(resource.Id.Resource, ":")
+	arr := strings.Split(res.Id.Resource, ":")
 	if len(arr) == 3 {
 		subscriptionID = arr[1]
 		resourceGroupName = arr[0]
@@ -126,7 +126,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resour
 	// Create a Role Assignments Client
 	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, ra.conn.token, ra.conn.client.ArmOptions())
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	scope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, resourceGroupName)
@@ -136,7 +136,7 @@ func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resour
 	for pagerResourceGroup.More() {
 		page, err := pagerResourceGroup.NextPage(ctx)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		for _, roleAssignment := range page.Value {
@@ -151,12 +151,12 @@ func (ra *roleAssignmentResourceGroupBuilder) Grants(ctx context.Context, resour
 			}
 
 			principalId = getPrincipalIDResource(principalType, roleAssignment)
-			gr = grant.NewGrant(resource, typeAssigned, principalId)
+			gr = grant.NewGrant(res, typeAssigned, principalId)
 			rv = append(rv, gr)
 		}
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
 func (ra *roleAssignmentResourceGroupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
