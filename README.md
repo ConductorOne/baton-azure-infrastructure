@@ -2,7 +2,7 @@
 
 #
 
-`baton-azure-infrastructure` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-azure-infrastructure.svg)](https://pkg.go.dev/github.com/conductorone/baton-azure-infrastructure) ![main ci](https://github.com/conductorone/baton-azure-infrastructure/actions/workflows/main.yaml/badge.svg)
+`baton-azure-infrastructure` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-azure-infrastructure.svg)](https://pkg.go.dev/github.com/conductorone/baton-azure-infrastructure) ![ci](https://github.com/conductorone/baton-azure-infrastructure/actions/workflows/ci.yaml/badge.svg) ![verify](https://github.com/conductorone/baton-azure-infrastructure/actions/workflows/verify.yaml/badge.svg)
 
 `baton-azure-infrastructure` is a connector for built using the [Baton SDK](https://github.com/conductorone/baton-sdk).
 
@@ -11,8 +11,8 @@ Check out [Baton](https://github.com/conductorone/baton) to learn more the proje
 # Requirements
 
 - You need a Microsoft tenant. You get one with an [Azure free trial](https://azure.microsoft.com/pricing/free-trial/).
-- Some of the more specific data is accessed via the Privileged Identity Management API. 
-   For this, the tenant requires the corresponding Premium License such as "Microsoft Entra ID P2" or "Microsoft Entra ID Governance". Not having one of them implies that a portion of the data will not be visible. 
+- Some of the more specific data is accessed via the Privileged Identity Management API.
+   For this, the tenant requires the corresponding Premium License such as "Microsoft Entra ID P2" or "Microsoft Entra ID Governance". Not having one of them implies that a portion of the data will not be visible.
 - Once you have a tenant, you need to create an application in Azure AD. You can follow the
   instructions [here](https://docs.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app).
 - When you create the application, you will get a `client_id` and a `client_secret`. You will need these to authenticate
@@ -103,7 +103,7 @@ Principal `e4e9c5ae-2937-408b-ba3c-0f58cf417f0a`
 BATON_AZURE_CLIENT_ID='client_Id' \
 BATON_AZURE_CLIENT_SECRET='client_secret' \
 BATON_AZURE_TENANT_ID='tenant_Id' baton-azure-infrastructure \
---grant-entitlement 'resource_group_role_assignment:test_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned' --grant-principal-type 'user' --grant-principal 'e4e9c5ae-2937-408b-ba3c-0f58cf417f0a' 
+--grant-entitlement 'resource_group_role_assignment:test_resource_group:39ea64c5-86d5-4c29-8199-5b602c90e1c5:11102f94-c441-49e6-a78b-ef80e0188abc:assigned' --grant-principal-type 'user' --grant-principal 'e4e9c5ae-2937-408b-ba3c-0f58cf417f0a'
 ```
 
 In the previous example we granted the resource group role `11102f94-c441-49e6-a78b-ef80e0188abc` to user
