@@ -9,6 +9,7 @@ import (
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
@@ -17,6 +18,8 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 // containerBuilder syncs Container given an StorageAccount.
@@ -67,6 +70,14 @@ func (usr *containerBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	for pager.More() {
 		result, err := pager.NextPage(ctx)
 		if err != nil {
+			if bloberror.HasCode(err, bloberror.AccountIsDisabled) {
+				l := ctxzap.Extract(ctx)
+				l.Warn("skipping disabled storage account when listing blob containers",
+					zap.String("storage_account", storageId.resourceName),
+					zap.Error(err),
+				)
+				return nil, "", nil, nil
+			}
 			return nil, "", nil, err
 		}
 
