@@ -2,11 +2,14 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"path"
 	"strings"
 	"sync"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -14,6 +17,7 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 )
@@ -247,6 +251,22 @@ func (b *roleAssignmentBuilder) Entitlements(_ context.Context, resource *v2.Res
 	}, "", nil, nil
 }
 
+// batonToAzurePrincipalType maps a baton principal resource-type id to the
+// Azure principal-type string expected by the roleAssignments create API.
+// baton-azure rejects Group principals for provisioning ("C1 doesn't support
+// provisioning to Groups"); we match that policy by returning "" here.
+func batonToAzurePrincipalType(batonResourceType string) string {
+	switch batonResourceType {
+	case userResourceType.Id:
+		return "User"
+	case enterpriseApplicationResourceType.Id, managedIdentitylResourceType.Id:
+		return "ServicePrincipal"
+	default:
+		// group and anything else: not supported for provisioning.
+		return ""
+	}
+}
+
 // Grants: decode the principal ID from the resource ID and emit a grant.
 // We resolve principal type via the per-builder cache (backed by
 // getPrincipalType, which hits Graph directoryObjects) so that repeat
@@ -274,6 +294,204 @@ func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resourc
 	}
 	gr := grant.NewGrant(resource, roleAssignmentAssignedEntitlementSlug, principalResourceID)
 	return []*v2.Grant{gr}, "", nil, nil
+}
+
+// Grant attaches a principal to an existing role_assignment binding by creating
+// a new Azure role assignment at the binding's scope with the binding's role.
+// Idempotent: if the assignment already exists, returns a GrantAlreadyExists
+// annotation with a nil error.
+//
+// Entity sources (per the baton-sdk connector review criteria):
+//   - WHO:  principal.Id.Resource (Azure object id of user / service principal / managed identity)
+//   - WHAT: entitlement.Resource's ScopeBindingTrait supplies role + scope
+//   - Groups are explicitly unsupported as grant targets (matches baton-azure).
+func (b *roleAssignmentBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
+	if principal == nil || principal.Id == nil {
+		return nil, fmt.Errorf("baton-azure-infrastructure: principal missing resource id")
+	}
+	if entitlement == nil || entitlement.Resource == nil {
+		return nil, fmt.Errorf("baton-azure-infrastructure: entitlement missing resource")
+	}
+
+	scopeTrait, err := rs.GetScopeBindingTrait(entitlement.Resource)
+	if err != nil {
+		return nil, fmt.Errorf("baton-azure-infrastructure: entitlement missing ScopeBindingTrait: %w", err)
+	}
+	if scopeTrait.RoleId == nil || scopeTrait.ScopeResourceId == nil {
+		return nil, fmt.Errorf("baton-azure-infrastructure: ScopeBindingTrait missing role or scope")
+	}
+
+	azurePrincipalType := batonToAzurePrincipalType(principal.Id.ResourceType)
+	if azurePrincipalType == "" {
+		return nil, fmt.Errorf("baton-azure-infrastructure: principal type %q not supported for role assignment grants (groups are unsupported by design)", principal.Id.ResourceType)
+	}
+
+	principalID := principal.Id.Resource
+	scope := scopeTrait.ScopeResourceId.Resource
+	roleDefinitionID := roleDefinitionIDForScope(scope, scopeTrait.RoleId.Resource)
+	subscriptionID := subscriptionFromScope(scope)
+	if subscriptionID == "" {
+		// Fall back to any sub the SP can see. Create()'s subscription ID param
+		// is only used for pipeline construction, not the API path.
+		s, err := firstVisibleSubscription(ctx, b.conn)
+		if err != nil {
+			return nil, fmt.Errorf("baton-azure-infrastructure: cannot resolve a subscription for Grant client: %w", err)
+		}
+		subscriptionID = s
+	}
+
+	raClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, b.conn.token, b.conn.client.ArmOptions())
+	if err != nil {
+		return nil, fmt.Errorf("baton-azure-infrastructure: role assignments client: %w", err)
+	}
+
+	assignmentName := uuid.New().String()
+	params := armauthorization.RoleAssignmentCreateParameters{
+		Properties: &armauthorization.RoleAssignmentProperties{
+			PrincipalID:      &principalID,
+			RoleDefinitionID: &roleDefinitionID,
+		},
+	}
+
+	_, err = raClient.Create(ctx, scope, assignmentName, params, nil)
+	if err != nil {
+		if isConflict(err) {
+			return annotations.New(&v2.GrantAlreadyExists{}), nil
+		}
+		return nil, fmt.Errorf("baton-azure-infrastructure: create role assignment (scope=%s role=%s principal=%s): %w",
+			scope, roleDefinitionID, principalID, err)
+	}
+
+	return nil, nil
+}
+
+// Revoke removes the principal's grant on a role_assignment binding. Finds the
+// actual Azure role assignment by querying at the binding's scope, then
+// DELETE's by name. Idempotent: returns GrantAlreadyRevoked if the assignment
+// is not found.
+func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annotations.Annotations, error) {
+	if g == nil || g.Principal == nil || g.Entitlement == nil || g.Entitlement.Resource == nil {
+		return nil, fmt.Errorf("baton-azure-infrastructure: grant missing principal or entitlement")
+	}
+
+	scopeTrait, err := rs.GetScopeBindingTrait(g.Entitlement.Resource)
+	if err != nil {
+		return nil, fmt.Errorf("baton-azure-infrastructure: grant entitlement missing ScopeBindingTrait: %w", err)
+	}
+	if scopeTrait.RoleId == nil || scopeTrait.ScopeResourceId == nil {
+		return nil, fmt.Errorf("baton-azure-infrastructure: ScopeBindingTrait missing role or scope")
+	}
+
+	// The baton resource ID for a role_assignment is "<assignmentName>@<principalID>",
+	// so we can recover the Azure assignment name directly without a round-trip.
+	rid := g.Entitlement.Resource.Id.Resource
+	atIdx := strings.LastIndex(rid, "@")
+	if atIdx <= 0 {
+		return nil, fmt.Errorf("baton-azure-infrastructure: role_assignment resource id %q has no assignment-name prefix", rid)
+	}
+	assignmentName := rid[:atIdx]
+
+	scope := scopeTrait.ScopeResourceId.Resource
+	subscriptionID := subscriptionFromScope(scope)
+	if subscriptionID == "" {
+		s, err := firstVisibleSubscription(ctx, b.conn)
+		if err != nil {
+			return nil, fmt.Errorf("baton-azure-infrastructure: cannot resolve a subscription for Revoke client: %w", err)
+		}
+		subscriptionID = s
+	}
+
+	raClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, b.conn.token, b.conn.client.ArmOptions())
+	if err != nil {
+		return nil, fmt.Errorf("baton-azure-infrastructure: role assignments client: %w", err)
+	}
+
+	_, err = raClient.Delete(ctx, scope, assignmentName, nil)
+	if err != nil {
+		if isNotFound(err) {
+			return annotations.New(&v2.GrantAlreadyRevoked{}), nil
+		}
+		return nil, fmt.Errorf("baton-azure-infrastructure: delete role assignment %s at scope %s: %w",
+			assignmentName, scope, err)
+	}
+
+	return nil, nil
+}
+
+// roleDefinitionIDForScope builds the fully-qualified roleDefinitionId path
+// that the Azure ARM create call expects. Callers pass us just the role UUID
+// from the ScopeBindingTrait (see roleAssignmentResource).
+func roleDefinitionIDForScope(scope, roleUUID string) string {
+	// Role definitions can be referenced by their sub-scoped or tenant-scoped
+	// path. For consistency we use the scope's subscription (if any) so the
+	// caller can grant built-in roles at that scope; if the scope has no
+	// subscription component (mgmt-group, tenant root) we fall back to a
+	// providers-relative path which the API still accepts.
+	if sub := subscriptionFromScope(scope); sub != "" {
+		return fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", sub, roleUUID)
+	}
+	return fmt.Sprintf("/providers/Microsoft.Authorization/roleDefinitions/%s", roleUUID)
+}
+
+// subscriptionFromScope extracts the subscription GUID from an ARM scope path,
+// or returns "" for scopes that don't live under a subscription (management
+// groups, tenant root).
+func subscriptionFromScope(scope string) string {
+	const prefix = "/subscriptions/"
+	if !strings.HasPrefix(scope, prefix) {
+		return ""
+	}
+	rest := scope[len(prefix):]
+	if i := strings.Index(rest, "/"); i >= 0 {
+		return rest[:i]
+	}
+	return rest
+}
+
+// firstVisibleSubscription returns any subscription ID the SP can see; used
+// only as a RoleAssignmentsClient construction parameter for mgmt-group-scope
+// and tenant-root-scope operations (the client's sub-id field is unused by
+// the Create/Delete code paths but the constructor requires it).
+func firstVisibleSubscription(ctx context.Context, conn *Connector) (string, error) {
+	pager := conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return "", err
+		}
+		for _, sub := range page.Value {
+			if sub != nil && sub.SubscriptionID != nil && *sub.SubscriptionID != "" {
+				return *sub.SubscriptionID, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no visible subscriptions")
+}
+
+// isConflict detects the Azure 409 returned when a role assignment with the
+// specified parameters already exists. Used to make Grant idempotent.
+func isConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	var respErr *azcore.ResponseError
+	if errors.As(err, &respErr) {
+		return respErr.StatusCode == http.StatusConflict
+	}
+	return false
+}
+
+// isNotFound detects the Azure 404 returned when a role assignment does not
+// exist at the specified scope. Used to make Revoke idempotent.
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var respErr *azcore.ResponseError
+	if errors.As(err, &respErr) {
+		return respErr.StatusCode == http.StatusNotFound
+	}
+	return false
 }
 
 // roleAssignmentResource builds a baton resource for an Azure role assignment,

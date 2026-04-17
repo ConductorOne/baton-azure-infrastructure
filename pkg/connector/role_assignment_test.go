@@ -1,8 +1,132 @@
 package connector
 
 import (
+	"errors"
+	"fmt"
+	"net/http"
 	"testing"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 )
+
+func TestAzureErrorClassifiers(t *testing.T) {
+	// Construct an azcore.ResponseError via a minimal http.Response. The SDK
+	// returns *ResponseError; our classifiers use errors.As to extract it.
+	makeRespErr := func(code int) error {
+		return &azcore.ResponseError{
+			StatusCode: code,
+			RawResponse: &http.Response{
+				StatusCode: code,
+			},
+		}
+	}
+	wrapped := fmt.Errorf("wrapping layer: %w", makeRespErr(http.StatusConflict))
+
+	tests := []struct {
+		name      string
+		err       error
+		forbidden bool
+		conflict  bool
+		notFound  bool
+	}{
+		{"nil error", nil, false, false, false},
+		{"plain error, no ResponseError", errors.New("boom"), false, false, false},
+		{"403", makeRespErr(http.StatusForbidden), true, false, false},
+		{"409", makeRespErr(http.StatusConflict), false, true, false},
+		{"404", makeRespErr(http.StatusNotFound), false, false, true},
+		{"200 is none", makeRespErr(http.StatusOK), false, false, false},
+		{"wrapped 409 still detected", wrapped, false, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isForbidden(tt.err); got != tt.forbidden {
+				t.Errorf("isForbidden = %v, want %v", got, tt.forbidden)
+			}
+			if got := isConflict(tt.err); got != tt.conflict {
+				t.Errorf("isConflict = %v, want %v", got, tt.conflict)
+			}
+			if got := isNotFound(tt.err); got != tt.notFound {
+				t.Errorf("isNotFound = %v, want %v", got, tt.notFound)
+			}
+		})
+	}
+}
+
+func TestBatonToAzurePrincipalType(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"user → User", userResourceType.Id, "User"},
+		{"enterprise_application → ServicePrincipal", enterpriseApplicationResourceType.Id, "ServicePrincipal"},
+		{"managed_identity → ServicePrincipal", managedIdentitylResourceType.Id, "ServicePrincipal"},
+		{"group → unsupported (empty)", groupResourceType.Id, ""},
+		{"unknown type → empty", "resource_group", ""},
+		{"empty → empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := batonToAzurePrincipalType(tt.in); got != tt.want {
+				t.Errorf("batonToAzurePrincipalType(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSubscriptionFromScope(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"sub-only", "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0", "0ba3df83-67b5-4a08-a561-e65fa74a1aa0"},
+		{"rg scope", "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0/resourceGroups/rg-apps-web-prd", "0ba3df83-67b5-4a08-a561-e65fa74a1aa0"},
+		{"sub-resource scope", "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0/resourceGroups/x/providers/Microsoft.KeyVault/vaults/kv/secrets/s", "0ba3df83-67b5-4a08-a561-e65fa74a1aa0"},
+		{"mgmt-group scope", "/providers/Microsoft.Management/managementGroups/c1connectors-root", ""},
+		{"tenant root", "/", ""},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := subscriptionFromScope(tt.in); got != tt.want {
+				t.Errorf("subscriptionFromScope(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRoleDefinitionIDForScope(t *testing.T) {
+	roleUUID := "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+	tests := []struct {
+		name  string
+		scope string
+		want  string
+	}{
+		{
+			name:  "sub-scope: role def is sub-qualified",
+			scope: "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0",
+			want:  "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7",
+		},
+		{
+			name:  "rg-scope: role def still sub-qualified",
+			scope: "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0/resourceGroups/rg-apps-web-prd",
+			want:  "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7",
+		},
+		{
+			name:  "mgmt-group scope: providers-relative fallback",
+			scope: "/providers/Microsoft.Management/managementGroups/c1connectors-root",
+			want:  "/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := roleDefinitionIDForScope(tt.scope, roleUUID); got != tt.want {
+				t.Errorf("roleDefinitionIDForScope = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestPrincipalTypeCache_HitReturnsStoredValue(t *testing.T) {
 	// Covers the pure cache-hit path of principalTypeForID: when the cache is
