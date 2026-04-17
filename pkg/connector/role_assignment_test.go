@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 )
 
 func TestAzureErrorClassifiers(t *testing.T) {
@@ -54,22 +55,30 @@ func TestAzureErrorClassifiers(t *testing.T) {
 }
 
 func TestBatonToAzurePrincipalType(t *testing.T) {
+	ptUser := armauthorization.PrincipalTypeUser
+	ptSP := armauthorization.PrincipalTypeServicePrincipal
 	tests := []struct {
 		name string
 		in   string
-		want string
+		want *armauthorization.PrincipalType
 	}{
-		{"user → User", userResourceType.Id, "User"},
-		{"enterprise_application → ServicePrincipal", enterpriseApplicationResourceType.Id, "ServicePrincipal"},
-		{"managed_identity → ServicePrincipal", managedIdentitylResourceType.Id, "ServicePrincipal"},
-		{"group → unsupported (empty)", groupResourceType.Id, ""},
-		{"unknown type → empty", "resource_group", ""},
-		{"empty → empty", "", ""},
+		{"user → User", userResourceType.Id, &ptUser},
+		{"enterprise_application → ServicePrincipal", enterpriseApplicationResourceType.Id, &ptSP},
+		{"managed_identity → ServicePrincipal", managedIdentitylResourceType.Id, &ptSP},
+		{"group → unsupported (nil)", groupResourceType.Id, nil},
+		{"unknown type → nil", "resource_group", nil},
+		{"empty → nil", "", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := batonToAzurePrincipalType(tt.in); got != tt.want {
-				t.Errorf("batonToAzurePrincipalType(%q) = %q, want %q", tt.in, got, tt.want)
+			got := batonToAzurePrincipalType(tt.in)
+			switch {
+			case got == nil && tt.want == nil:
+				// ok
+			case got == nil || tt.want == nil:
+				t.Errorf("batonToAzurePrincipalType(%q) = %v, want %v", tt.in, got, tt.want)
+			case *got != *tt.want:
+				t.Errorf("batonToAzurePrincipalType(%q) = %q, want %q", tt.in, *got, *tt.want)
 			}
 		})
 	}
@@ -265,7 +274,7 @@ func TestMapGraphPrincipalTypeToBaton(t *testing.T) {
 		{"Graph group odata type", "#microsoft.graph.group", groupResourceType.Id},
 		{"Graph servicePrincipal odata type", "#microsoft.graph.servicePrincipal", enterpriseApplicationResourceType.Id},
 		{"Azure RBAC 'Application' principal type", "Application", enterpriseApplicationResourceType.Id},
-		{"Azure RBAC 'ServicePrincipal' principal type", "ServicePrincipal", enterpriseApplicationResourceType.Id},
+		{"Azure RBAC 'ServicePrincipal' principal type", string(armauthorization.PrincipalTypeServicePrincipal), enterpriseApplicationResourceType.Id},
 		{"ManagedIdentity principal type", "ManagedIdentity", managedIdentitylResourceType.Id},
 		{"unknown type returns empty (caller drops the grant)", "SomethingElse", ""},
 		{"empty string returns empty", "", ""},

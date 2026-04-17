@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -22,16 +22,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	roleAssignmentAssignedEntitlementSlug = "assigned"
-
-	// Azure RBAC principal-type strings accepted by the roleAssignments Create
-	// API (see RoleAssignmentProperties.PrincipalType). Also used by the
-	// Graph-odata-type to baton-type mapping since Graph returns the same
-	// tokens for SPs/MIs in some paths.
-	azurePrincipalTypeUser             = "User"
-	azurePrincipalTypeServicePrincipal = "ServicePrincipal"
-)
+const roleAssignmentAssignedEntitlementSlug = "assigned"
 
 // roleAssignmentBuilder emits one resource per actual Azure role assignment
 // visible to the SP, carrying a ScopeBindingTrait annotation that pairs the
@@ -143,7 +134,7 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 			if err != nil {
 				return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role assignments client: %w", err)
 			}
-			raPager := raClient.NewListPager(nil)
+			raPager := raClient.NewListForSubscriptionPager(nil)
 			for raPager.More() {
 				raPage, err := raPager.NextPage(ctx)
 				if err != nil {
@@ -258,18 +249,21 @@ func (b *roleAssignmentBuilder) Entitlements(_ context.Context, resource *v2.Res
 }
 
 // batonToAzurePrincipalType maps a baton principal resource-type id to the
-// Azure principal-type string expected by the roleAssignments create API.
-// baton-azure rejects Group principals for provisioning ("C1 doesn't support
-// provisioning to Groups"); we match that policy by returning "" here.
-func batonToAzurePrincipalType(batonResourceType string) string {
+// typed Azure PrincipalType enum (as of armauthorization v2). Returns nil
+// for principal types we refuse to grant — baton-azure's policy ("C1 doesn't
+// support provisioning to Groups") treats groups as unsupported, and any
+// unrecognised baton type also returns nil.
+func batonToAzurePrincipalType(batonResourceType string) *armauthorization.PrincipalType {
 	switch batonResourceType {
 	case userResourceType.Id:
-		return azurePrincipalTypeUser
+		pt := armauthorization.PrincipalTypeUser
+		return &pt
 	case enterpriseApplicationResourceType.Id, managedIdentitylResourceType.Id:
-		return azurePrincipalTypeServicePrincipal
+		pt := armauthorization.PrincipalTypeServicePrincipal
+		return &pt
 	default:
 		// group and anything else: not supported for provisioning.
-		return ""
+		return nil
 	}
 }
 
@@ -329,17 +323,12 @@ func (b *roleAssignmentBuilder) Grant(ctx context.Context, principal *v2.Resourc
 
 	// Gatekeeper: we accept only baton principal types Azure recognises
 	// (user / service principal / managed identity). Groups are rejected per
-	// baton-azure's policy ("C1 doesn't support provisioning to Groups").
-	//
-	// The resulting Azure principal-type string is unused further down: in the
-	// vendored armauthorization v1.0.0, the RoleAssignmentsClient.Create path
-	// uses RoleAssignmentProperties — a 2015-07-01-api-version struct with only
-	// PrincipalID + RoleDefinitionID, no PrincipalType field. Azure performs
-	// the principal-type lookup server-side at Create time. Bumping to a newer
-	// armauthorization major (v2.x) would let us pass PrincipalType explicitly
-	// and save the round-trip + support callers lacking Graph read — tracked
-	// as a follow-up SDK upgrade, out of scope here.
-	if batonToAzurePrincipalType(principal.Id.ResourceType) == "" {
+	// baton-azure's policy ("C1 doesn't support provisioning to Groups"). The
+	// armauthorization v2 Create call accepts a typed PrincipalType, which we
+	// pass through verbatim (saves Azure a server-side Graph lookup and keeps
+	// Grant working for callers whose SPs lack Graph read permission).
+	azurePrincipalType := batonToAzurePrincipalType(principal.Id.ResourceType)
+	if azurePrincipalType == nil {
 		return nil, fmt.Errorf("baton-azure-infrastructure: principal type %q not supported for role assignment grants (groups are unsupported by design)", principal.Id.ResourceType)
 	}
 
@@ -367,6 +356,7 @@ func (b *roleAssignmentBuilder) Grant(ctx context.Context, principal *v2.Resourc
 		Properties: &armauthorization.RoleAssignmentProperties{
 			PrincipalID:      &principalID,
 			RoleDefinitionID: &roleDefinitionID,
+			PrincipalType:    azurePrincipalType,
 		},
 	}
 
@@ -609,7 +599,7 @@ func mapGraphPrincipalTypeToBaton(graphType string) string {
 		return userResourceType.Id
 	case "#microsoft.graph.group":
 		return groupResourceType.Id
-	case "#microsoft.graph.servicePrincipal", "Application", azurePrincipalTypeServicePrincipal:
+	case "#microsoft.graph.servicePrincipal", "Application", string(armauthorization.PrincipalTypeServicePrincipal):
 		return enterpriseApplicationResourceType.Id
 	case "ManagedIdentity":
 		return managedIdentitylResourceType.Id
