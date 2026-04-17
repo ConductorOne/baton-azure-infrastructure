@@ -15,6 +15,8 @@ import (
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // managementGroupBuilder emits one resource per Azure management group visible
@@ -119,13 +121,18 @@ func listManagementGroups(ctx context.Context, token azcore.TokenCredential, arm
 // isForbidden detects the Azure ARM 403 that indicates the SP lacks access at
 // the queried scope. Used by the mgmt-group walker to degrade gracefully when
 // the caller has subscription-level creds but not tenant-root creds.
+// isForbidden detects 403 on the two error shapes Azure calls arrive in
+// through this connector: raw azcore.ResponseError (SDK-native) and
+// gRPC-status PermissionDenied (baton-sdk middleware shape). Covering both
+// matters because list-walk errors and Grant/Revoke errors travel
+// different paths.
 func isForbidden(err error) bool {
 	if err == nil {
 		return false
 	}
 	var respErr *azcore.ResponseError
-	if errors.As(err, &respErr) {
-		return respErr.StatusCode == http.StatusForbidden
+	if errors.As(err, &respErr) && respErr.StatusCode == http.StatusForbidden {
+		return true
 	}
-	return false
+	return status.Code(err) == codes.PermissionDenied
 }

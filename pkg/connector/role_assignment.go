@@ -21,6 +21,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const roleAssignmentAssignedEntitlementSlug = "assigned"
@@ -367,23 +369,28 @@ func (b *roleAssignmentBuilder) Grant(ctx context.Context, principal *v2.Resourc
 		// reasonable response is refuse.
 		return nil, fmt.Errorf("baton-azure-infrastructure: refusing Grant: principal id %q is not a GUID", principalID)
 	}
-	scope := scopeTrait.ScopeResourceId.Resource
-	// ScopeBindingTrait.role_id is the composite "<roleUUID>:<subscriptionID>"
-	// that roleBuilder emits (see helper.go:getRoleId). Azure's roleDefinition
-	// path takes only the UUID suffix — passing the composite produces an
-	// invalid path and a 400 from ARM. Strip first.
+
+	// ScopeBindingTrait values hold BUILDER-FORMAT resource ids (bare sub
+	// GUID / bare RG name / full ARM path for mgmt-group), not Azure ARM
+	// scope paths. Reconstruct the full ARM scope + role-definition path
+	// before talking to Azure.
 	roleUUID := roleUUIDFromBindingRef(scopeTrait.RoleId.Resource)
-	roleDefinitionID := roleDefinitionIDForScope(scope, roleUUID)
-	subscriptionID := subscriptionFromScope(scope)
+	// subscription ID is packed into role_id's composite ("<uuid>:<sub>")
+	// because the role builder emits it there; resource_group refs in the
+	// binding carry only the bare RG name, so we rely on the role_id to
+	// recover the sub.
+	subscriptionID := subscriptionFromBindingRoleRef(scopeTrait.RoleId.Resource)
 	if subscriptionID == "" {
-		// Fall back to any sub the SP can see. Create()'s subscription ID param
-		// is only used for pipeline construction, not the API path.
+		// Fallback for mgmt-group-scope bindings whose role_id has no sub
+		// component (the colon-less case): pick any sub the SP can see.
 		s, err := firstVisibleSubscription(ctx, b.conn)
 		if err != nil {
 			return nil, fmt.Errorf("baton-azure-infrastructure: cannot resolve a subscription for Grant client: %w", err)
 		}
 		subscriptionID = s
 	}
+	scope := armScopeFromBindingRef(scopeTrait.ScopeResourceId.ResourceType, scopeTrait.ScopeResourceId.Resource, subscriptionID)
+	roleDefinitionID := roleDefinitionIDForScope(scope, roleUUID)
 
 	raClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, b.conn.token, b.conn.client.ArmOptions())
 	if err != nil {
@@ -445,14 +452,13 @@ func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annota
 		// anything else rather than risk widening the list scope.
 		return nil, fmt.Errorf("baton-azure-infrastructure: refusing Revoke: principal id %q is not a GUID", principalID)
 	}
-	scope := scopeTrait.ScopeResourceId.Resource
-	// ScopeBindingTrait.role_id is the composite "<roleUUID>:<subscriptionID>"
-	// that roleBuilder emits (see helper.go:getRoleId). Peel off the UUID for
-	// role-matching below; Azure role assignments store the full definition
-	// path whose last segment is the UUID.
-	roleUUID := roleUUIDFromBindingRef(scopeTrait.RoleId.Resource)
 
-	subscriptionID := subscriptionFromScope(scope)
+	// ScopeBindingTrait holds builder-format resource ids (bare GUID / bare
+	// name / full ARM path), not Azure ARM scopes. Reconstruct before use.
+	// The subscription ID is packed into role_id's composite; scope_resource_id
+	// carries only the bare RG name / GUID (or full ARM path for mgmt-group).
+	roleUUID := roleUUIDFromBindingRef(scopeTrait.RoleId.Resource)
+	subscriptionID := subscriptionFromBindingRoleRef(scopeTrait.RoleId.Resource)
 	if subscriptionID == "" {
 		s, err := firstVisibleSubscription(ctx, b.conn)
 		if err != nil {
@@ -460,17 +466,21 @@ func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annota
 		}
 		subscriptionID = s
 	}
+	scope := armScopeFromBindingRef(scopeTrait.ScopeResourceId.ResourceType, scopeTrait.ScopeResourceId.Resource, subscriptionID)
 
 	raClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, b.conn.token, b.conn.client.ArmOptions())
 	if err != nil {
 		return nil, fmt.Errorf("baton-azure-infrastructure: role assignments client: %w", err)
 	}
 
-	// Azure $filter for role_assignments supports `atScope()` and
-	// `principalId eq '{guid}'`; it does NOT support a role_definition filter,
-	// so we match the role UUID locally. In practice each (principal, scope)
-	// pair holds at most a handful of assignments so this is cheap.
-	filter := fmt.Sprintf("atScope() and principalId eq '%s'", principalID)
+	// Azure $filter for role_assignments at api-version 2022-04-01 accepts
+	// exactly ONE of `atScope()`, `principalId eq '{value}'`, or
+	// `assignedTo('{value}')` — combinations return 400 UnsupportedQuery
+	// (live-verified). We use `atScope()` (narrows the wire payload to
+	// assignments at exactly this scope, not descendants/ancestors) and
+	// match the principal + role UUID locally. Each scope usually holds
+	// well under a hundred assignments so this is cheap.
+	filter := "atScope()"
 	pager := raClient.NewListForScopePager(scope, &armauthorization.RoleAssignmentsClientListForScopeOptions{
 		Filter: &filter,
 	})
@@ -485,10 +495,14 @@ func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annota
 				scope, principalID, err)
 		}
 		for _, ra := range page.Value {
-			if ra == nil || ra.Properties == nil || ra.Name == nil || ra.Properties.RoleDefinitionID == nil {
+			if ra == nil || ra.Properties == nil || ra.Name == nil ||
+				ra.Properties.RoleDefinitionID == nil || ra.Properties.PrincipalID == nil {
 				continue
 			}
-			if path.Base(*ra.Properties.RoleDefinitionID) == roleUUID {
+			// Match principal + role locally (atScope() already narrowed
+			// the server response to this exact scope).
+			if *ra.Properties.PrincipalID == principalID &&
+				path.Base(*ra.Properties.RoleDefinitionID) == roleUUID {
 				assignmentName = *ra.Name
 				break
 			}
@@ -501,13 +515,11 @@ func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annota
 		return annotations.New(&v2.GrantAlreadyRevoked{}), nil
 	}
 
-	_, err = raClient.Delete(ctx, scope, assignmentName, nil)
+	deleteResp, err := raClient.Delete(ctx, scope, assignmentName, nil)
 	if err != nil {
-		// Race: another deleter removed the assignment between list and
-		// delete. ARM's DELETE is documented as returning 204 on a missing
-		// assignment, so this nil-error path is the common "already gone"
-		// case; 404 is kept as defense-in-depth for malformed scope or
-		// api-version skew.
+		// 404 is defense-in-depth for malformed scope / api-version skew.
+		// ARM's documented 204-on-missing behaviour arrives via err==nil
+		// and is handled below.
 		if isNotFound(err) {
 			return annotations.New(&v2.GrantAlreadyRevoked{}), nil
 		}
@@ -515,6 +527,17 @@ func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annota
 			assignmentName, scope, err)
 	}
 
+	// Azure's DELETE is idempotent: 204 on a non-existent assignment returns
+	// with err == nil and an empty RoleAssignment body. Distinguish "we
+	// actually deleted it" (response carries the deleted assignment) from
+	// "already gone" (empty response) so c1 can surface the
+	// GrantAlreadyRevoked annotation in the latter case. This matters when
+	// the filter-list-then-delete pattern races against Azure eventual
+	// consistency: the list returns a ghost entry, delete 204s, and the
+	// caller needs to know it was effectively a no-op.
+	if deleteResp.Name == nil {
+		return annotations.New(&v2.GrantAlreadyRevoked{}), nil
+	}
 	return nil, nil
 }
 
@@ -570,28 +593,35 @@ func firstVisibleSubscription(ctx context.Context, conn *Connector) (string, err
 
 // isConflict detects the Azure 409 returned when a role assignment with the
 // specified parameters already exists. Used to make Grant idempotent.
+//
+// The check spans two error-representation paths: raw azcore.ResponseError
+// (how the Azure SDK normally surfaces status codes) and the gRPC-status
+// shape that baton-sdk's middleware wraps Azure errors into
+// (`status.Code(err) == codes.AlreadyExists` for 409). Covering both keeps
+// Grant idempotent whether the SDK or the middleware won the race.
 func isConflict(err error) bool {
 	if err == nil {
 		return false
 	}
 	var respErr *azcore.ResponseError
-	if errors.As(err, &respErr) {
-		return respErr.StatusCode == http.StatusConflict
+	if errors.As(err, &respErr) && respErr.StatusCode == http.StatusConflict {
+		return true
 	}
-	return false
+	return status.Code(err) == codes.AlreadyExists
 }
 
 // isNotFound detects the Azure 404 returned when a role assignment does not
-// exist at the specified scope. Used to make Revoke idempotent.
+// exist at the specified scope. Used to make Revoke idempotent. Same dual
+// detection logic as isConflict — see that function's docstring.
 func isNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
 	var respErr *azcore.ResponseError
-	if errors.As(err, &respErr) {
-		return respErr.StatusCode == http.StatusNotFound
+	if errors.As(err, &respErr) && respErr.StatusCode == http.StatusNotFound {
+		return true
 	}
-	return false
+	return status.Code(err) == codes.NotFound
 }
 
 // roleAssignmentResource builds a baton resource for an Azure role assignment,
@@ -745,6 +775,42 @@ var azureGUIDRegexp = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-f
 // interpolating.
 func isAzureGUID(s string) bool {
 	return azureGUIDRegexp.MatchString(s)
+}
+
+// subscriptionFromBindingRoleRef extracts the subscription GUID encoded in
+// ScopeBindingTrait.role_id, whose format is "<roleUUID>:<subscriptionID>"
+// per the role builder's emission (see helper.go:getRoleId). Returns ""
+// when no subscription component is present (e.g. mgmt-group-only roles
+// that the builder might emit without a sub suffix).
+func subscriptionFromBindingRoleRef(compositeRoleID string) string {
+	if colon := strings.Index(compositeRoleID, ":"); colon > 0 && colon < len(compositeRoleID)-1 {
+		return compositeRoleID[colon+1:]
+	}
+	return ""
+}
+
+// armScopeFromBindingRef reconstructs the Azure ARM scope string from a
+// ScopeBindingTrait.scope_resource_id. The binding carries BUILDER-FORMAT ids
+// (bare sub GUID / bare RG name / full ARM path for mgmt-group) rather than
+// ARM scopes, so Grant and Revoke need to rebuild the path before calling
+// Azure. For resource_group the sub is not in the binding; callers pass it
+// in (typically recovered from the role_id composite via
+// subscriptionFromBindingRoleRef).
+func armScopeFromBindingRef(scopeResourceType, scopeResourceID, subscriptionID string) string {
+	switch scopeResourceType {
+	case subscriptionsResourceType.Id:
+		return "/subscriptions/" + scopeResourceID
+	case resourceGroupResourceType.Id:
+		return fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, scopeResourceID)
+	case managementGroupResourceType.Id:
+		// management_group builder emits the full ARM path as the resource
+		// id, so nothing to reconstruct.
+		return scopeResourceID
+	default:
+		// Tenant root or unrecognised; pass through unchanged. Better to
+		// send a path Azure rejects than to silently mutate.
+		return scopeResourceID
+	}
 }
 
 // parsePrincipalFromRoleAssignmentResourceID returns the principal ID portion

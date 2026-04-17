@@ -9,6 +9,8 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestAzureErrorClassifiers(t *testing.T) {
@@ -24,6 +26,13 @@ func TestAzureErrorClassifiers(t *testing.T) {
 	}
 	wrapped := fmt.Errorf("wrapping layer: %w", makeRespErr(http.StatusConflict))
 
+	// baton-sdk middleware sometimes transforms Azure errors into gRPC
+	// statuses (observed on live Grant/Revoke: 409 arrives as
+	// codes.AlreadyExists with the original 409 embedded in the text).
+	grpcConflict := status.Error(codes.AlreadyExists, "Request failed with status 409")
+	grpcNotFound := status.Error(codes.NotFound, "Request failed with status 404")
+	grpcForbidden := status.Error(codes.PermissionDenied, "Request failed with status 403")
+
 	tests := []struct {
 		name      string
 		err       error
@@ -33,11 +42,14 @@ func TestAzureErrorClassifiers(t *testing.T) {
 	}{
 		{"nil error", nil, false, false, false},
 		{"plain error, no ResponseError", errors.New("boom"), false, false, false},
-		{"403", makeRespErr(http.StatusForbidden), true, false, false},
-		{"409", makeRespErr(http.StatusConflict), false, true, false},
-		{"404", makeRespErr(http.StatusNotFound), false, false, true},
+		{"403 (azcore)", makeRespErr(http.StatusForbidden), true, false, false},
+		{"409 (azcore)", makeRespErr(http.StatusConflict), false, true, false},
+		{"404 (azcore)", makeRespErr(http.StatusNotFound), false, false, true},
 		{"200 is none", makeRespErr(http.StatusOK), false, false, false},
-		{"wrapped 409 still detected", wrapped, false, true, false},
+		{"wrapped 409 (azcore) still detected", wrapped, false, true, false},
+		{"409 (gRPC status)", grpcConflict, false, true, false},
+		{"404 (gRPC status)", grpcNotFound, false, false, true},
+		{"403 (gRPC status)", grpcForbidden, true, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
