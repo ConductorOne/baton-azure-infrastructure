@@ -22,7 +22,16 @@ import (
 	"go.uber.org/zap"
 )
 
-const roleAssignmentAssignedEntitlementSlug = "assigned"
+const (
+	roleAssignmentAssignedEntitlementSlug = "assigned"
+
+	// Azure RBAC principal-type strings accepted by the roleAssignments Create
+	// API (see RoleAssignmentProperties.PrincipalType). Also used by the
+	// Graph-odata-type to baton-type mapping since Graph returns the same
+	// tokens for SPs/MIs in some paths.
+	azurePrincipalTypeUser             = "User"
+	azurePrincipalTypeServicePrincipal = "ServicePrincipal"
+)
 
 // roleAssignmentBuilder emits one resource per actual Azure role assignment
 // visible to the SP, carrying a ScopeBindingTrait annotation that pairs the
@@ -212,14 +221,11 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 							continue
 						}
 						// Always overwrite: stage-2 scope is authoritative over
-						// stage-1's projection.
-						_, wasExisting := byID[resource.Id.Resource]
+						// stage-1's projection. mgEmitted counts every assignment
+						// the mgmt-group walk touched (either newly added or
+						// corrected from the sub walk's projection).
 						put(resource, true)
-						if wasExisting {
-							mgEmitted++ // overwritten — scope corrected
-						} else {
-							mgEmitted++ // newly added
-						}
+						mgEmitted++
 					}
 				}
 				l.Debug("baton-azure-infrastructure: mgmt-group scope walked",
@@ -258,9 +264,9 @@ func (b *roleAssignmentBuilder) Entitlements(_ context.Context, resource *v2.Res
 func batonToAzurePrincipalType(batonResourceType string) string {
 	switch batonResourceType {
 	case userResourceType.Id:
-		return "User"
+		return azurePrincipalTypeUser
 	case enterpriseApplicationResourceType.Id, managedIdentitylResourceType.Id:
-		return "ServicePrincipal"
+		return azurePrincipalTypeServicePrincipal
 	default:
 		// group and anything else: not supported for provisioning.
 		return ""
@@ -586,7 +592,7 @@ func mapGraphPrincipalTypeToBaton(graphType string) string {
 		return userResourceType.Id
 	case "#microsoft.graph.group":
 		return groupResourceType.Id
-	case "#microsoft.graph.servicePrincipal", "Application", "ServicePrincipal":
+	case "#microsoft.graph.servicePrincipal", "Application", azurePrincipalTypeServicePrincipal:
 		return enterpriseApplicationResourceType.Id
 	case "ManagedIdentity":
 		return managedIdentitylResourceType.Id

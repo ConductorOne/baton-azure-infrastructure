@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -139,13 +140,19 @@ func TestPrincipalTypeCache_HitReturnsStoredValue(t *testing.T) {
 	const wantType = "#microsoft.graph.user"
 	b.principalTypeCache.Store(pid, wantType)
 
-	got := b.principalTypeForID(nil, pid)
+	// Use context.Background() rather than nil — principalTypeForID's cache-hit
+	// path doesn't actually consult the context, but staticcheck (SA1012)
+	// rightly refuses to let us pass nil to a function that accepts a
+	// context.Context.
+	ctx := context.Background()
+
+	got := b.principalTypeForID(ctx, pid)
 	if got != wantType {
 		t.Errorf("principalTypeForID cache hit returned %q, want %q", got, wantType)
 	}
 
 	// Second call must still hit the cache (no eviction).
-	got = b.principalTypeForID(nil, pid)
+	got = b.principalTypeForID(ctx, pid)
 	if got != wantType {
 		t.Errorf("principalTypeForID second cache hit returned %q, want %q", got, wantType)
 	}
