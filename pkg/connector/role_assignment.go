@@ -89,100 +89,129 @@ func (b *roleAssignmentBuilder) ResourceType(_ context.Context) *v2.ResourceType
 	return roleAssignmentResourceType
 }
 
-// List enumerates every Azure role assignment visible to the caller and emits
-// one baton resource per unique assignment. The walk has two stages:
+// raListPhase identifies which stage of the role_assignment walk the
+// pagination bag is currently driving.
+type raListPhase string
+
+const (
+	// raPhaseInit: first call. Seed pending subscriptions + emit all
+	// mgmt-group-scope assignments in a single go (mgmt-group count is
+	// small in practice).
+	raPhaseInit raListPhase = ""
+	// raPhaseSub: per-call, emit one subscription's role assignments
+	// (walking Azure's internal pager to exhaustion for that sub) and
+	// advance.
+	raPhaseSub raListPhase = "sub"
+)
+
+// raBagState is the pagination bag state for roleAssignmentBuilder.List.
+// It drives a streaming walk: first call does full mgmt-group enumeration
+// (yielding stage-2 resources immediately + collecting their names in
+// SeenAssignmentNames), subsequent calls each handle one subscription
+// (yielding stage-1 resources that weren't already emitted by stage-2).
 //
-//  1. Sub-and-below: for each subscription the SP can see, NewListPager
-//     returns assignments whose scope is at the subscription or descendants.
-//     The ARM API also returns ancestor-inherited assignments here, but
-//     represents them with a *projected* subscription-level scope rather than
-//     their actual (mgmt-group) scope.
-//  2. Mgmt-group-scope: for each management group, NewListForScopePager
-//     returns assignments whose scope is at that mgmt group.
+// Memory at rest (serialized into the pagination token between calls) is
+// bounded by (a) the list of pending subscription IDs — typically 10-5000
+// strings — and (b) the seen-set of mgmt-group-scope assignment names —
+// typically well under 1000 entries. Concretely: ~(5K subs × 36 bytes +
+// 1K seen × 36 bytes) = ~216 KB serialized in the worst mainstream case.
+// No unbounded accumulator.
+type raBagState struct {
+	Phase               raListPhase `json:"p,omitempty"`
+	PendingSubs         []string    `json:"ps,omitempty"`
+	CurrentSub          string      `json:"cs,omitempty"`
+	SeenAssignmentNames []string    `json:"sn,omitempty"`
+}
+
+// List enumerates every Azure role assignment visible to the caller and
+// streams them through the baton-sdk pagination contract: each call
+// returns one page of resources plus a continuation token.
 //
-// Because stage-1 projects ancestor-inherited assignments to the subscription
-// scope (the same assignment GUID shows up there with a different scope
-// string), we dedup by assignment name + principal ID and let stage-2
-// *overwrite* any stage-1 entry for the same assignment. Mgmt-group walk
-// has the authoritative scope; stage-1's projection is lossy.
+// **Walk strategy** — live-verified against api-version 2022-04-01:
 //
-// If the caller lacks tenant-root access, mgmt-group enumeration returns
-// empty + no error (degrade-gracefully pattern) and List continues with
-// stage-1 coverage only.
-func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+//  1. Mgmt-group-scope assignments at tenant-root ARE returned by the
+//     subscription walk (NewListForSubscriptionPager) with their
+//     authoritative scope — so stage-2's historical job of "overwriting
+//     a projected scope" is no longer necessary.
+//  2. However, assignments at *intermediate* mgmt groups (between
+//     tenant-root and a subscription) are NOT included by the sub walk.
+//     The mgmt-group walk still needs to run to pick those up.
+//
+// So the refactored contract is: stage-2 for completeness (intermediate
+// mgmt-group scopes), stage-1 for bulk (subs × descendants), dedup via a
+// seen-set carried in the pagination token. No overwrite semantic.
+//
+// **Memory characteristics (this refactor):**
+//
+//	Peak in-memory per List call: one subscription's assignments × ~1.5 KB
+//	  (typical 100-500 assignments → 150-750 KB; hyperscale sub ~10k → ~15 MB)
+//	State carried between calls: list of pending sub IDs + seen-set of
+//	  mgmt-group-scope names, bounded at ~216 KB in the worst mainstream
+//	  case (5K subs + 1K mgmt-scope assignments).
+//
+// Replaces the previous in-memory `map[id]*Resource` which grew
+// unbounded with tenant size (filed as issue #80; this is the fix).
+//
+// **Degradation:**
+//
+//	If the caller lacks tenant-root access, mgmt-group enumeration
+//	returns empty + no error — List continues with stage-1 coverage
+//	only. Per-sub 403s are logged and skipped (common in mixed-
+//	permission enterprise tenants).
+func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
-	// Map keyed by resource.Id.Resource (= "<assignmentName>@<principalID>").
-	// Stage-1 populates; stage-2 overwrites when it finds a better scope.
-	byID := make(map[string]*v2.Resource)
-
-	put := func(resource *v2.Resource, overwrite bool) {
-		if resource == nil {
-			return
-		}
-		if _, exists := byID[resource.Id.Resource]; exists && !overwrite {
-			return
-		}
-		byID[resource.Id.Resource] = resource
+	bag, err := pagination.GenBagFromToken[raBagState](pToken)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role_assignment pagination: %w", err)
 	}
 
-	// Stage 1: walk each subscription. A subscription-scoped RoleAssignmentsClient
-	// returns all assignments at the sub or below (RG and resource scopes).
+	// First-call seed: kick off with the init phase.
+	if bag.Current() == nil {
+		bag.Push(raBagState{Phase: raPhaseInit})
+	}
+
+	state := bag.Pop()
+
+	switch state.Phase {
+	case raPhaseInit:
+		return b.listInit(ctx, l, bag)
+	case raPhaseSub:
+		return b.listSubPage(ctx, l, bag, state)
+	default:
+		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role_assignment pagination: unknown phase %q", state.Phase)
+	}
+}
+
+// listInit handles the first pagination call: enumerate subscriptions,
+// emit every mgmt-group-scope assignment in a single page, and seed the
+// bag with the pending-sub list + the mgmt-group-scope seen-set.
+func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag *pagination.GenBag[raBagState]) ([]*v2.Resource, string, annotations.Annotations, error) {
+	// Enumerate subscriptions (IDs only; we walk each one in its own page
+	// during the sub phase).
 	subsPager := b.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
-	var firstSubID string
+	var pendingSubs []string
 	for subsPager.More() {
 		subsPage, err := subsPager.NextPage(ctx)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing subscriptions: %w", err)
 		}
 		for _, sub := range subsPage.Value {
-			if sub == nil || sub.SubscriptionID == nil {
+			if sub == nil || sub.SubscriptionID == nil || *sub.SubscriptionID == "" {
 				continue
 			}
-			subID := *sub.SubscriptionID
-			if firstSubID == "" {
-				firstSubID = subID
-			}
-
-			raClient, err := armauthorization.NewRoleAssignmentsClient(subID, b.conn.token, b.conn.client.ArmOptions())
-			if err != nil {
-				return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role assignments client: %w", err)
-			}
-			raPager := raClient.NewListForSubscriptionPager(nil)
-		subPager:
-			for raPager.More() {
-				raPage, err := raPager.NextPage(ctx)
-				if err != nil {
-					// Mixed-permission tenants (a common enterprise shape) have
-					// subs where the SP can enumerate the subscription itself
-					// but lacks Microsoft.Authorization/roleAssignments/read on
-					// that sub. 403 here should degrade gracefully (same pattern
-					// used by the mgmt-group walk below and by baton-azure).
-					if isForbidden(err) {
-						l.Warn("baton-azure-infrastructure: forbidden listing role assignments for sub; skipping",
-							zap.String("subID", subID), zap.Error(err))
-						break subPager
-					}
-					return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments for sub %s: %w", subID, err)
-				}
-				for _, ra := range raPage.Value {
-					if ra == nil || ra.Properties == nil {
-						continue
-					}
-					resource, err := roleAssignmentResource(subID, ra)
-					if err != nil {
-						return nil, "", nil, err
-					}
-					put(resource, false)
-				}
-			}
+			pendingSubs = append(pendingSubs, *sub.SubscriptionID)
 		}
 	}
 
-	// Stage 2: walk each management group for assignments *at* that scope.
-	// armauthorization.RoleAssignmentsClient needs a subscription ID for
-	// construction even though NewListForScopePager accepts any scope; reuse
-	// firstSubID from stage 1. If no subscriptions were visible, skip stage 2.
+	var firstSubID string
+	if len(pendingSubs) > 0 {
+		firstSubID = pendingSubs[0]
+	}
+
+	// Walk all mgmt groups, emit their assignments, collect names for dedup.
+	var emitted []*v2.Resource
+	var seenNames []string
 	if firstSubID != "" {
 		mgs, err := listManagementGroups(ctx, b.conn.token, b.conn.client.ArmOptions())
 		if err != nil {
@@ -193,120 +222,141 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 			if err != nil {
 				return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role assignments client for mgmt-group walk: %w", err)
 			}
-			// No atScope filter here: NewListForScopePager against a mgmt-group
-			// scope returns assignments at that scope plus descendants. Stage 2
-			// overwrites stage-1 entries for the same assignment because stage-1
-			// projects ancestor-inherited assignments onto the subscription scope
-			// (a lossy representation); the mgmt-group walk carries the actual
-			// scope. Descendant-scope assignments that both walks surface get
-			// overwritten with the same value (no-op).
 			for _, mg := range mgs {
 				if mg == nil || mg.ID == nil {
 					continue
 				}
 				mgScope := *mg.ID
-				mgEmitted := 0
-				mgPageCount := 0
-				mgRawSeen := 0
 				pager := raClient.NewListForScopePager(mgScope, nil)
 				for pager.More() {
-					page, err := pager.NextPage(ctx)
-					if err != nil {
-						// If this particular mgmt-group scope 403s, warn and continue
-						// — matches the graceful pattern in baton-azure's
-						// role_assignments.go:213.
-						if isForbidden(err) {
+					page, pagerErr := pager.NextPage(ctx)
+					if pagerErr != nil {
+						// Degrade gracefully on per-mgmt-group 403 (common
+						// for SPs without Management Group Reader at this
+						// scope).
+						if isForbidden(pagerErr) {
 							l.Warn("baton-azure-infrastructure: forbidden listing role assignments at mgmt-group scope; skipping",
-								zap.String("mgScope", mgScope), zap.Error(err))
+								zap.String("mgScope", mgScope), zap.Error(pagerErr))
 							break
 						}
-						return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments at mgmt-group %s: %w", mgScope, err)
+						return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments at mgmt-group %s: %w", mgScope, pagerErr)
 					}
-					mgPageCount++
-					mgRawSeen += len(page.Value)
 					for _, ra := range page.Value {
-						if ra == nil || ra.Properties == nil {
+						if ra == nil || ra.Properties == nil || ra.Name == nil {
 							continue
 						}
-						resource, err := roleAssignmentResource(firstSubID, ra)
-						if err != nil {
-							return nil, "", nil, err
+						resource, resErr := roleAssignmentResource(firstSubID, ra)
+						if resErr != nil {
+							return nil, "", nil, resErr
 						}
 						if resource == nil {
 							continue
 						}
-						// Always overwrite: stage-2 scope is authoritative over
-						// stage-1's projection. mgEmitted counts every assignment
-						// the mgmt-group walk touched (either newly added or
-						// corrected from the sub walk's projection).
-						put(resource, true)
-						mgEmitted++
+						emitted = append(emitted, resource)
+						seenNames = append(seenNames, *ra.Name)
 					}
 				}
-				l.Debug("baton-azure-infrastructure: mgmt-group scope walked",
-					zap.String("mgScope", mgScope),
-					zap.Int("pages", mgPageCount),
-					zap.Int("rawSeen", mgRawSeen),
-					zap.Int("emitted", mgEmitted))
 			}
 		}
 	}
 
-	// Flatten the dedup map to a stable slice.
-	//
-	// =========================================================================
-	// MEMORY CHARACTERISTICS & SCALE NOTES
-	// =========================================================================
-	// This List accumulates every role_assignment resource in `byID` before
-	// returning. The two-stage walk (sub-and-below first, then mgmt-group-
-	// scope with stage-2 overwriting stage-1's lossy scope projection)
-	// cannot stream straight through baton-sdk pagination without losing
-	// the overwrite contract, so we buffer.
-	//
-	// Per-resource cost: ~1-2 KB (proto + ScopeBindingTrait annotation +
-	// string fields for displayName / description / scope ARM path).
-	//
-	// Scale projections:
-	//
-	//   Tenant profile                                    | N (role_assignments) | Buffered RAM
-	//   --------------------------------------------------+----------------------+--------------
-	//   Lab (this repo's lab tenant)                      |                   77 |      ~150 KB
-	//   SMB  (≤5 subs, one flat org)                      |               <1,000 |      <2   MB
-	//   Mid-market (20-50 subs, modest mgmt-group tree)   |        1,000-10,000  |     1.5-15 MB
-	//   Enterprise (50-500 subs, significant RG fanout)   |       10,000-100,000 |       15-200 MB
-	//   Large enterprise (many subs × descendant scopes)  |      100,000-500,000 |      200 MB-1 GB
-	//   Hyperscale (5K+ subs)                             |         1,000,000+   |      1.5 GB+
-	//
-	// (Descendant-scope assignments — e.g. per-KV-secret, per-queue, per-
-	// container scopes — multiply the count further if those scope resource
-	// types are emitted; NOTES.md item G tracks that extension.)
-	//
-	// Operator guidance: the WARN below fires at 50K buffered entries, which
-	// corresponds roughly to mid-enterprise scale and ~75 MB. At hyperscale
-	// this List would need either (a) a streaming refactor using
-	// baton-sdk's pagination.Bag with phase state + a seen-set persisted
-	// across calls, or (b) dropping the stage-2 overwrite entirely once we
-	// empirically verify Azure returns the actual (not projected) scope on
-	// stage-1 at api-version 2022-04-01 — in which case stage-2 becomes
-	// redundant and the single-pass walk streams cleanly.
-	//
-	// Follow-up: filed as a tracked issue on this PR. Do NOT fix it in a
-	// hot path without re-running the live Grant/Revoke integration test
-	// (pkg/connector/role_assignment_live_test.go, build tag `live`) —
-	// the stage-2 overwrite behavior is currently load-bearing for
-	// mgmt-group-scope bindings.
-	// =========================================================================
-	const largeTenantWarnAt = 50_000
-	if len(byID) >= largeTenantWarnAt {
-		l.Warn("baton-azure-infrastructure: role_assignment sync buffered a large number of assignments; memory pressure likely. File an issue to request pagination support.",
-			zap.Int("count", len(byID)),
-			zap.Int("warn_threshold", largeTenantWarnAt))
+	// Seed the sub-walk phase if we have subs to visit.
+	if len(pendingSubs) > 0 {
+		bag.Push(raBagState{
+			Phase:               raPhaseSub,
+			PendingSubs:         pendingSubs,
+			CurrentSub:          pendingSubs[0],
+			SeenAssignmentNames: seenNames,
+		})
 	}
-	rv := make([]*v2.Resource, 0, len(byID))
-	for _, r := range byID {
-		rv = append(rv, r)
+
+	return finishPage(bag, emitted)
+}
+
+// listSubPage handles one call's worth of work in the sub phase: walk
+// every Azure page of the current subscription's role assignments (the
+// Azure SDK pager doesn't expose its continuation token publicly, so we
+// process one whole sub per baton call rather than one Azure page),
+// dedup against the mgmt-group-scope seen-set, then advance to the next
+// pending sub.
+func (b *roleAssignmentBuilder) listSubPage(ctx context.Context, l *zap.Logger, bag *pagination.GenBag[raBagState], state *raBagState) ([]*v2.Resource, string, annotations.Annotations, error) {
+	subID := state.CurrentSub
+	seen := make(map[string]struct{}, len(state.SeenAssignmentNames))
+	for _, n := range state.SeenAssignmentNames {
+		seen[n] = struct{}{}
 	}
-	return rv, "", nil, nil
+
+	var emitted []*v2.Resource
+	if subID != "" {
+		raClient, err := armauthorization.NewRoleAssignmentsClient(subID, b.conn.token, b.conn.client.ArmOptions())
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role assignments client: %w", err)
+		}
+		pager := raClient.NewListForSubscriptionPager(nil)
+	subPager:
+		for pager.More() {
+			page, pagerErr := pager.NextPage(ctx)
+			if pagerErr != nil {
+				// Graceful 403 on a sub we can see but can't read
+				// role-assignments on.
+				if isForbidden(pagerErr) {
+					l.Warn("baton-azure-infrastructure: forbidden listing role assignments for sub; skipping",
+						zap.String("subID", subID), zap.Error(pagerErr))
+					break subPager
+				}
+				return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments for sub %s: %w", subID, pagerErr)
+			}
+			for _, ra := range page.Value {
+				if ra == nil || ra.Properties == nil || ra.Name == nil {
+					continue
+				}
+				if _, dup := seen[*ra.Name]; dup {
+					continue
+				}
+				seen[*ra.Name] = struct{}{}
+				resource, resErr := roleAssignmentResource(subID, ra)
+				if resErr != nil {
+					return nil, "", nil, resErr
+				}
+				if resource == nil {
+					continue
+				}
+				emitted = append(emitted, resource)
+			}
+		}
+	}
+
+	// Advance: drop the sub we just processed, push the next.
+	remaining := state.PendingSubs
+	if len(remaining) > 0 && remaining[0] == subID {
+		remaining = remaining[1:]
+	}
+	if len(remaining) > 0 {
+		bag.Push(raBagState{
+			Phase:               raPhaseSub,
+			PendingSubs:         remaining,
+			CurrentSub:          remaining[0],
+			SeenAssignmentNames: state.SeenAssignmentNames,
+		})
+	}
+
+	return finishPage(bag, emitted)
+}
+
+// finishPage serializes the bag and returns the (resources, nextToken,
+// annotations, error) tuple in the shape List expects.
+func finishPage(bag *pagination.GenBag[raBagState], emitted []*v2.Resource) ([]*v2.Resource, string, annotations.Annotations, error) {
+	nextToken, err := bag.Marshal()
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role_assignment pagination marshal: %w", err)
+	}
+	// When the bag is fully drained Marshal returns a non-empty
+	// empty-states envelope; the SDK's end-of-pagination signal is an
+	// empty string, so flatten to "" when there's no more work.
+	if bag.Current() == nil {
+		nextToken = ""
+	}
+	return emitted, nextToken, nil, nil
 }
 
 func (b *roleAssignmentBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
