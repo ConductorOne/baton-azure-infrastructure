@@ -253,6 +253,22 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 	}
 
 	// Flatten the dedup map to a stable slice.
+	//
+	// MEMORY NOTE: this List accumulates every role assignment in memory
+	// (stage-1 sub walk + stage-2 mgmt-group overwrite). Each resource is
+	// ~1-2 KB of proto + annotation, so a tenant with ~100K role
+	// assignments holds ~150-200 MB during sync. Typical enterprise
+	// tenants (tens of subs, ~10K assignments) are well under this; very
+	// large / hyperscale tenants need a streaming refactor to baton-sdk's
+	// pagination.Bag (tracked separately). We surface an operator WARN at
+	// 50K so large-tenant deployments get a visible heads-up rather than
+	// a silent OOM.
+	const largeTenantWarnAt = 50_000
+	if len(byID) >= largeTenantWarnAt {
+		l.Warn("baton-azure-infrastructure: role_assignment sync buffered a large number of assignments; memory pressure likely. File an issue to request pagination support.",
+			zap.Int("count", len(byID)),
+			zap.Int("warn_threshold", largeTenantWarnAt))
+	}
 	rv := make([]*v2.Resource, 0, len(byID))
 	for _, r := range byID {
 		rv = append(rv, r)

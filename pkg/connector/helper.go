@@ -647,8 +647,15 @@ func getPrincipalIDResource(principalType string, assignment *armauthorization.R
 			Resource:     *assignment.Properties.PrincipalID,
 		}
 	case "#microsoft.graph.group":
+		// Entra/AD groups (Graph directory groups) are routed to
+		// groupResourceType — NOT resourceGroupResourceType (which is the
+		// Azure ARM "resource group" concept, a completely different thing
+		// that uses bare RG names like "rg-apps-web-prd" as its id). The
+		// earlier mapping produced ~900 dangling principal references per
+		// lab sync because Entra group GUIDs never resolve as Azure RG
+		// names; found during cross-link validation on this PR.
 		principalId = &v2.ResourceId{
-			ResourceType: resourceGroupResourceType.Id,
+			ResourceType: groupResourceType.Id,
 			Resource:     *assignment.Properties.PrincipalID,
 		}
 	case "Application":
