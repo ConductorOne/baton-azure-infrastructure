@@ -108,10 +108,11 @@ func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resourc
 	}
 	principalType, err := getPrincipalType(ctx, b.conn, principalID)
 	if err != nil {
-		// Graph lookup failed (stale principal, permission issue, transient). Log
-		// at debug level and emit no grant rather than failing the whole sync —
-		// matches the degrade-gracefully pattern used elsewhere in this connector.
-		ctxzap.Extract(ctx).Debug(
+		// Graph lookup failed (stale principal, permission issue, transient).
+		// Log at Warn so the skip is visible in production (Debug would hide
+		// silent data loss); emit no grant rather than failing the whole sync
+		// — matches the degrade-gracefully pattern elsewhere in this connector.
+		ctxzap.Extract(ctx).Warn(
 			"baton-azure-infrastructure: getPrincipalType failed; dropping grant emission for this binding",
 			zap.String("principal_id", principalID),
 			zap.String("role_assignment_resource_id", resource.Id.Resource),
