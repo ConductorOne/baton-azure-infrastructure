@@ -425,6 +425,12 @@ func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annota
 
 	_, err = raClient.Delete(ctx, scope, assignmentName, nil)
 	if err != nil {
+		// Azure's DELETE at this endpoint is idempotent at the API level: a
+		// non-existent assignment returns 204 No Content, not 404, so a nil
+		// err path here is the common "already revoked" case (no annotation
+		// needed — bare nil is success). The 404 branch is still kept as
+		// defense-in-depth for edge cases (malformed scope, api-version skew,
+		// etc.) so the SDK surfaces the "gone" signal cleanly.
 		if isNotFound(err) {
 			return annotations.New(&v2.GrantAlreadyRevoked{}), nil
 		}
