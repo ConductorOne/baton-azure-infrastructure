@@ -13,6 +13,8 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 const roleAssignmentAssignedEntitlementSlug = "assigned"
@@ -100,15 +102,21 @@ func (b *roleAssignmentBuilder) Entitlements(_ context.Context, resource *v2.Res
 // We resolve principal type via getPrincipalType() (queries Graph directoryObjects
 // endpoint), matching the existing resource_group_role_assignment.go pattern.
 func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	principalID, ok := parsePrincipalFromRoleAssignmentResourceID(resource.Id.Resource)
-	if !ok || principalID == "" {
+	principalID, parsedOK := parsePrincipalFromRoleAssignmentResourceID(resource.Id.Resource)
+	if !parsedOK || principalID == "" {
 		return nil, "", nil, nil
 	}
 	principalType, err := getPrincipalType(ctx, b.conn, principalID)
 	if err != nil {
-		// Graph lookup failed (stale principal, permission issue, transient). Emit
-		// no grant rather than failing the whole sync — matches the
-		// degrade-gracefully pattern used elsewhere in this connector.
+		// Graph lookup failed (stale principal, permission issue, transient). Log
+		// at debug level and emit no grant rather than failing the whole sync —
+		// matches the degrade-gracefully pattern used elsewhere in this connector.
+		ctxzap.Extract(ctx).Debug(
+			"baton-azure-infrastructure: getPrincipalType failed; dropping grant emission for this binding",
+			zap.String("principal_id", principalID),
+			zap.String("role_assignment_resource_id", resource.Id.Resource),
+			zap.Error(err),
+		)
 		return nil, "", nil, nil
 	}
 	principalResourceType := mapGraphPrincipalTypeToBaton(principalType)
@@ -189,7 +197,11 @@ func scopeResourceTypeForAzureScope(scope string) string {
 	}
 }
 
-func parsePrincipalFromRoleAssignmentResourceID(id string) (principalID string, ok bool) {
+// parsePrincipalFromRoleAssignmentResourceID returns the principal ID portion
+// of a role_assignment resource ID (format: "<assignmentName>@<principalID>").
+// The second return value is false when the input does not match the expected
+// "name@principal" format.
+func parsePrincipalFromRoleAssignmentResourceID(id string) (string, bool) {
 	idx := strings.LastIndex(id, "@")
 	if idx == -1 || idx == len(id)-1 {
 		return "", false
