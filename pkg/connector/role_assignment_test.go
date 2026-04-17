@@ -228,6 +228,24 @@ func TestParsePrincipalFromRoleAssignmentResourceID(t *testing.T) {
 			wantID: "",
 			wantOk: false,
 		},
+		{
+			name:   "bare @ with nothing on either side",
+			in:     "@",
+			wantID: "",
+			wantOk: false,
+		},
+		{
+			name:   "trailing @ after other text (abc@)",
+			in:     "abc@",
+			wantID: "",
+			wantOk: false,
+		},
+		{
+			name:   "multiple @ uses LastIndex (a@b@c → c)",
+			in:     "a@b@c",
+			wantID: "c",
+			wantOk: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -237,6 +255,57 @@ func TestParsePrincipalFromRoleAssignmentResourceID(t *testing.T) {
 			}
 			if ok != tt.wantOk {
 				t.Errorf("parsePrincipalFromRoleAssignmentResourceID(%q) ok = %v, want %v", tt.in, ok, tt.wantOk)
+			}
+		})
+	}
+}
+
+// TestRoleUUIDFromBindingRef pins the extraction of the bare role UUID from a
+// ScopeBindingTrait.role_id reference. The role builder emits a composite
+// "<uuid>:<subscriptionID>" string (see helper.go:getRoleId); Revoke strips
+// the subscription suffix via strings.Index(":") with a `colon > 0` guard.
+func TestRoleUUIDFromBindingRef(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "well-formed composite is stripped to UUID",
+			in:   "974c5e8b-45b9-4653-ba55-5f855dd0fb88:0ba3df83-67b5-4a08-a561-e65fa74a1aa0",
+			want: "974c5e8b-45b9-4653-ba55-5f855dd0fb88",
+		},
+		{
+			name: "bare UUID (no colon) passes through unchanged",
+			in:   "acdd72a7-3385-48ef-bd42-f606fba81ae7",
+			want: "acdd72a7-3385-48ef-bd42-f606fba81ae7",
+		},
+		{
+			name: "empty string passes through unchanged",
+			in:   "",
+			want: "",
+		},
+		{
+			// Intentional defensive behavior: the `colon > 0` guard refuses to
+			// trim to empty when the colon is at position 0. An empty role
+			// UUID would match every assignment's RoleDefinitionID basename
+			// during Revoke, so preserving the whole malformed string is
+			// safer — it will simply match nothing and fall through to
+			// GrantAlreadyRevoked.
+			name: "leading colon preserves whole string (not trimmed to empty)",
+			in:   ":x:y",
+			want: ":x:y",
+		},
+		{
+			name: "trailing colon drops the empty suffix",
+			in:   "acdd72a7-3385-48ef-bd42-f606fba81ae7:",
+			want: "acdd72a7-3385-48ef-bd42-f606fba81ae7",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := roleUUIDFromBindingRef(tt.in); got != tt.want {
+				t.Errorf("roleUUIDFromBindingRef(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
@@ -357,6 +426,49 @@ func TestScopeResourceRefFromAzureScope(t *testing.T) {
 			scope:    "/",
 			wantType: tenantResourceType.Id,
 			wantID:   "/",
+		},
+		{
+			// Empty input is a defensive case — the ARM API shouldn't hand us
+			// one, but if it does we fall through to tenant type with empty
+			// id rather than panicking.
+			name:     "empty string → tenant fallback with empty id",
+			scope:    "",
+			wantType: tenantResourceType.Id,
+			wantID:   "",
+		},
+		{
+			// Missing `providers/Microsoft.Management/managementGroups/` prefix
+			// but otherwise plausible-looking — falls through to tenant default.
+			name:     "malformed mgmt-group-ish path falls through to tenant",
+			scope:    "/providers/Microsoft.Management/wrongThing/foo",
+			wantType: tenantResourceType.Id,
+			wantID:   "/providers/Microsoft.Management/wrongThing/foo",
+		},
+		{
+			// Double leading slashes — defensively we don't match `subPrefix`
+			// (which requires exactly `/subscriptions/`), so fall through.
+			name:     "double slash prefix falls through to tenant",
+			scope:    "//subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0",
+			wantType: tenantResourceType.Id,
+			wantID:   "//subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0",
+		},
+		{
+			// Trailing slash on a subscription-only scope. The tokenizer
+			// consumes up to the first `/` after the prefix, yielding the bare
+			// sub GUID — the trailing empty segment is benign.
+			name:     "subscription scope with trailing slash → bare sub GUID",
+			scope:    "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0/",
+			wantType: subscriptionsResourceType.Id,
+			wantID:   "0ba3df83-67b5-4a08-a561-e65fa74a1aa0",
+		},
+		{
+			// Garbage input with no recognizable prefix at all. Tenant
+			// fallback preserves the raw string as id so downstream
+			// inspection can spot the anomaly.
+			name:     "totally unrecognized path falls through to tenant",
+			scope:    "not-a-scope-at-all",
+			wantType: tenantResourceType.Id,
+			wantID:   "not-a-scope-at-all",
 		},
 	}
 	for _, tt := range tests {

@@ -431,10 +431,7 @@ func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annota
 	// that roleBuilder emits (see helper.go:getRoleId). Peel off the UUID for
 	// role-matching below; Azure role assignments store the full definition
 	// path whose last segment is the UUID.
-	roleUUID := scopeTrait.RoleId.Resource
-	if colon := strings.Index(roleUUID, ":"); colon > 0 {
-		roleUUID = roleUUID[:colon]
-	}
+	roleUUID := roleUUIDFromBindingRef(scopeTrait.RoleId.Resource)
 
 	subscriptionID := subscriptionFromScope(scope)
 	if subscriptionID == "" {
@@ -694,6 +691,25 @@ func scopeResourceRefFromAzureScope(scope string) (string, string) {
 	default:
 		return tenantResourceType.Id, scope
 	}
+}
+
+// roleUUIDFromBindingRef peels the role UUID off the composite
+// "<roleUUID>:<subscriptionID>" identifier that the role builder emits for
+// ScopeBindingTrait.role_id (see helper.go:getRoleId). Revoke uses the bare
+// UUID to match against Azure assignments' RoleDefinitionID path suffix.
+//
+// Defensive behavior:
+//   - Bare UUID (no colon): returned unchanged.
+//   - Well-formed composite ("<uuid>:<sub>"): UUID is returned.
+//   - Leading-colon input (":x:y"): the `colon > 0` guard preserves the
+//     whole string rather than silently trimming to empty — an empty role
+//     UUID would match every assignment's basename, which would be worse
+//     than a no-op.
+func roleUUIDFromBindingRef(id string) string {
+	if colon := strings.Index(id, ":"); colon > 0 {
+		return id[:colon]
+	}
+	return id
 }
 
 // parsePrincipalFromRoleAssignmentResourceID returns the principal ID portion
