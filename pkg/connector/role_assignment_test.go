@@ -1,6 +1,31 @@
 package connector
 
-import "testing"
+import (
+	"testing"
+)
+
+func TestPrincipalTypeCache_HitReturnsStoredValue(t *testing.T) {
+	// Covers the pure cache-hit path of principalTypeForID: when the cache is
+	// pre-populated with a string value, the function must return it without
+	// touching Graph. The miss path (cache empty OR non-string entry) calls
+	// getPrincipalType which requires a live Connector + Graph token and is
+	// therefore exercised only in live lab validation.
+	b := &roleAssignmentBuilder{}
+	const pid = "4d3a9fc4-022d-4db4-9215-4a25d2ece45a"
+	const wantType = "#microsoft.graph.user"
+	b.principalTypeCache.Store(pid, wantType)
+
+	got := b.principalTypeForID(nil, pid)
+	if got != wantType {
+		t.Errorf("principalTypeForID cache hit returned %q, want %q", got, wantType)
+	}
+
+	// Second call must still hit the cache (no eviction).
+	got = b.principalTypeForID(nil, pid)
+	if got != wantType {
+		t.Errorf("principalTypeForID second cache hit returned %q, want %q", got, wantType)
+	}
+}
 
 func TestParsePrincipalFromRoleAssignmentResourceID(t *testing.T) {
 	tests := []struct {

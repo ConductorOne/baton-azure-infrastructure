@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -29,10 +30,43 @@ const roleAssignmentAssignedEntitlementSlug = "assigned"
 // azure-sdk-for-go typed armauthorization client rather than hand-rolled REST.
 type roleAssignmentBuilder struct {
 	conn *Connector
+
+	// principalTypeCache memoizes getPrincipalType(ctx, conn, principalID) results
+	// across calls. A single principal typically holds many role assignments, so
+	// without this cache Grants() would hit Microsoft Graph's directoryObjects
+	// endpoint once per binding — throttling risk at customer scale. sync.Map
+	// because Grants may be invoked concurrently per resource.
+	principalTypeCache sync.Map // map[principalID string] -> principalType string
 }
 
 func newRoleAssignmentBuilder(conn *Connector) *roleAssignmentBuilder {
 	return &roleAssignmentBuilder{conn: conn}
+}
+
+// principalTypeForID resolves the Graph directoryObjects type for a principal,
+// consulting the per-builder cache first. Returns "" on lookup failure so the
+// caller can drop the grant without propagating the error (degrade-gracefully
+// pattern used elsewhere in this connector). Failures are logged at Warn so
+// dropped grants are visible in production (Debug would hide silent data
+// loss); Warn fires at most once per principal because successful lookups
+// populate the cache.
+func (b *roleAssignmentBuilder) principalTypeForID(ctx context.Context, principalID string) string {
+	if v, ok := b.principalTypeCache.Load(principalID); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	pt, err := getPrincipalType(ctx, b.conn, principalID)
+	if err != nil {
+		ctxzap.Extract(ctx).Warn(
+			"baton-azure-infrastructure: getPrincipalType failed; dropping grant for this principal",
+			zap.String("principal_id", principalID),
+			zap.Error(err),
+		)
+		return ""
+	}
+	b.principalTypeCache.Store(principalID, pt)
+	return pt
 }
 
 func (b *roleAssignmentBuilder) ResourceType(_ context.Context) *v2.ResourceType {
@@ -99,25 +133,20 @@ func (b *roleAssignmentBuilder) Entitlements(_ context.Context, resource *v2.Res
 }
 
 // Grants: decode the principal ID from the resource ID and emit a grant.
-// We resolve principal type via getPrincipalType() (queries Graph directoryObjects
-// endpoint), matching the existing resource_group_role_assignment.go pattern.
+// We resolve principal type via the per-builder cache (backed by
+// getPrincipalType, which hits Graph directoryObjects) so that repeat
+// principals across many bindings don't each incur a Graph roundtrip.
 func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	principalID, parsedOK := parsePrincipalFromRoleAssignmentResourceID(resource.Id.Resource)
 	if !parsedOK || principalID == "" {
 		return nil, "", nil, nil
 	}
-	principalType, err := getPrincipalType(ctx, b.conn, principalID)
-	if err != nil {
-		// Graph lookup failed (stale principal, permission issue, transient).
-		// Log at Warn so the skip is visible in production (Debug would hide
-		// silent data loss); emit no grant rather than failing the whole sync
-		// — matches the degrade-gracefully pattern elsewhere in this connector.
-		ctxzap.Extract(ctx).Warn(
-			"baton-azure-infrastructure: getPrincipalType failed; dropping grant emission for this binding",
-			zap.String("principal_id", principalID),
-			zap.String("role_assignment_resource_id", resource.Id.Resource),
-			zap.Error(err),
-		)
+	principalType := b.principalTypeForID(ctx, principalID)
+	if principalType == "" {
+		// Graph lookup failed or principal is unknown (logged at Warn inside
+		// principalTypeForID). Emit no grant rather than failing the whole
+		// sync — matches the degrade-gracefully pattern used elsewhere in
+		// this connector.
 		return nil, "", nil, nil
 	}
 	principalResourceType := mapGraphPrincipalTypeToBaton(principalType)
