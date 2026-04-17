@@ -502,9 +502,11 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 			Version(client.V1).
 			BuildUrl(endpoint, principalID)
 
-		err := cn.client.FromPath(ctx, builderUrl, &principalData)
-		if err != nil {
-			return "", err
+		// Try each endpoint in turn. A 404/403 on one endpoint is common (guest
+		// users and cross-tenant SPs miss directoryObjects) — fall through to
+		// the next endpoint instead of aborting the whole lookup.
+		if err := cn.client.FromPath(ctx, builderUrl, &principalData); err != nil {
+			continue
 		}
 
 		if principalType, ok := principalData["@odata.type"].(string); ok {
