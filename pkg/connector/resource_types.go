@@ -62,6 +62,13 @@ var (
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_SCOPE_BINDING},
 	}
 
+	managementGroupResourceType = &v2.ResourceType{
+		Id:          "management_group",
+		DisplayName: "Management Group",
+		Description: "An Azure management group — a hierarchical container for subscriptions. Acts as a scope carrier for role assignments; no entitlements of its own.",
+		Annotations: annotations.New(&v2.SkipEntitlementsAndGrants{}),
+	}
+
 	roleResourceType = &v2.ResourceType{
 		Id:          "role",
 		DisplayName: "Role",

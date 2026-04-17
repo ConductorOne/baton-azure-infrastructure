@@ -58,9 +58,14 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 	// Opt-in: emit Azure role assignments as TRAIT_SCOPE_BINDING resources so
 	// the c1 uplift (PR ductone/c1#16540) can classify this app as SPARSE or
 	// HYBRID and route it through the sparse-ACL UX. Default-off so existing
-	// deployments don't silently re-classify on upgrade.
+	// deployments don't silently re-classify on upgrade. management_group is
+	// registered alongside so that role_assignment resources whose scope is a
+	// mgmt group reference a real emitted parent resource in the c1z.
 	if d.syncRoleAssignments {
-		syncers = append(syncers, newRoleAssignmentBuilder(d))
+		syncers = append(syncers,
+			newRoleAssignmentBuilder(d),
+			newManagementGroupBuilder(d),
+		)
 	}
 
 	if !d.skipStorageContainerSync {

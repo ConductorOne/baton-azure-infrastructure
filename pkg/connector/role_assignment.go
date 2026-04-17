@@ -73,14 +73,45 @@ func (b *roleAssignmentBuilder) ResourceType(_ context.Context) *v2.ResourceType
 	return roleAssignmentResourceType
 }
 
-// List walks every subscription the SP can see and enumerates all role
-// assignments visible to the caller (NewListPager returns assignments at
-// subscription scope and descendants, per Azure semantics). Returns one
-// baton resource per assignment.
+// List enumerates every Azure role assignment visible to the caller and emits
+// one baton resource per unique assignment. The walk has two stages:
+//
+//  1. Sub-and-below: for each subscription the SP can see, NewListPager
+//     returns assignments whose scope is at the subscription or descendants.
+//     The ARM API also returns ancestor-inherited assignments here, but
+//     represents them with a *projected* subscription-level scope rather than
+//     their actual (mgmt-group) scope.
+//  2. Mgmt-group-scope: for each management group, NewListForScopePager
+//     returns assignments whose scope is at that mgmt group.
+//
+// Because stage-1 projects ancestor-inherited assignments to the subscription
+// scope (the same assignment GUID shows up there with a different scope
+// string), we dedup by assignment name + principal ID and let stage-2
+// *overwrite* any stage-1 entry for the same assignment. Mgmt-group walk
+// has the authoritative scope; stage-1's projection is lossy.
+//
+// If the caller lacks tenant-root access, mgmt-group enumeration returns
+// empty + no error (degrade-gracefully pattern) and List continues with
+// stage-1 coverage only.
 func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	var rv []*v2.Resource
+	// Map keyed by resource.Id.Resource (= "<assignmentName>@<principalID>").
+	// Stage-1 populates; stage-2 overwrites when it finds a better scope.
+	byID := make(map[string]*v2.Resource)
 
+	put := func(resource *v2.Resource, overwrite bool) {
+		if resource == nil {
+			return
+		}
+		if _, exists := byID[resource.Id.Resource]; exists && !overwrite {
+			return
+		}
+		byID[resource.Id.Resource] = resource
+	}
+
+	// Stage 1: walk each subscription. A subscription-scoped RoleAssignmentsClient
+	// returns all assignments at the sub or below (RG and resource scopes).
 	subsPager := b.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
+	var firstSubID string
 	for subsPager.More() {
 		subsPage, err := subsPager.NextPage(ctx)
 		if err != nil {
@@ -91,6 +122,9 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 				continue
 			}
 			subID := *sub.SubscriptionID
+			if firstSubID == "" {
+				firstSubID = subID
+			}
 
 			raClient, err := armauthorization.NewRoleAssignmentsClient(subID, b.conn.token, b.conn.client.ArmOptions())
 			if err != nil {
@@ -110,12 +144,93 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 					if err != nil {
 						return nil, "", nil, err
 					}
-					if resource != nil {
-						rv = append(rv, resource)
-					}
+					put(resource, false)
 				}
 			}
 		}
+	}
+
+	// Stage 2: walk each management group for assignments *at* that scope.
+	// armauthorization.RoleAssignmentsClient needs a subscription ID for
+	// construction even though NewListForScopePager accepts any scope; reuse
+	// firstSubID from stage 1. If no subscriptions were visible, skip stage 2.
+	l := ctxzap.Extract(ctx)
+	if firstSubID != "" {
+		mgs, err := listManagementGroups(ctx, b.conn.token, b.conn.client.ArmOptions())
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing management groups: %w", err)
+		}
+		if len(mgs) > 0 {
+			raClient, err := armauthorization.NewRoleAssignmentsClient(firstSubID, b.conn.token, b.conn.client.ArmOptions())
+			if err != nil {
+				return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role assignments client for mgmt-group walk: %w", err)
+			}
+			// No atScope filter here: NewListForScopePager against a mgmt-group
+			// scope returns assignments at that scope plus descendants. Stage 2
+			// overwrites stage-1 entries for the same assignment because stage-1
+			// projects ancestor-inherited assignments onto the subscription scope
+			// (a lossy representation); the mgmt-group walk carries the actual
+			// scope. Descendant-scope assignments that both walks surface get
+			// overwritten with the same value (no-op).
+			for _, mg := range mgs {
+				if mg == nil || mg.ID == nil {
+					continue
+				}
+				mgScope := *mg.ID
+				mgEmitted := 0
+				mgPageCount := 0
+				mgRawSeen := 0
+				pager := raClient.NewListForScopePager(mgScope, nil)
+				for pager.More() {
+					page, err := pager.NextPage(ctx)
+					if err != nil {
+						// If this particular mgmt-group scope 403s, warn and continue
+						// — matches the graceful pattern in baton-azure's
+						// role_assignments.go:213.
+						if isForbidden(err) {
+							l.Warn("baton-azure-infrastructure: forbidden listing role assignments at mgmt-group scope; skipping",
+								zap.String("mgScope", mgScope), zap.Error(err))
+							break
+						}
+						return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments at mgmt-group %s: %w", mgScope, err)
+					}
+					mgPageCount++
+					mgRawSeen += len(page.Value)
+					for _, ra := range page.Value {
+						if ra == nil || ra.Properties == nil {
+							continue
+						}
+						resource, err := roleAssignmentResource(firstSubID, ra)
+						if err != nil {
+							return nil, "", nil, err
+						}
+						if resource == nil {
+							continue
+						}
+						// Always overwrite: stage-2 scope is authoritative over
+						// stage-1's projection.
+						_, wasExisting := byID[resource.Id.Resource]
+						put(resource, true)
+						if wasExisting {
+							mgEmitted++ // overwritten — scope corrected
+						} else {
+							mgEmitted++ // newly added
+						}
+					}
+				}
+				l.Debug("baton-azure-infrastructure: mgmt-group scope walked",
+					zap.String("mgScope", mgScope),
+					zap.Int("pages", mgPageCount),
+					zap.Int("rawSeen", mgRawSeen),
+					zap.Int("emitted", mgEmitted))
+			}
+		}
+	}
+
+	// Flatten the dedup map to a stable slice.
+	rv := make([]*v2.Resource, 0, len(byID))
+	for _, r := range byID {
+		rv = append(rv, r)
 	}
 	return rv, "", nil, nil
 }
@@ -214,10 +329,15 @@ func roleAssignmentResource(subscriptionID string, ra *armauthorization.RoleAssi
 }
 
 // scopeResourceTypeForAzureScope picks the best-matching baton resource type
-// for an ARM scope path. For scopes this connector doesn't emit, we fall
-// through to the nearest parent we do emit.
+// for an ARM scope path. Mgmt-group scopes resolve to managementGroupResourceType
+// so role_assignment bindings at that scope can reference the emitted mgmt
+// group. For scopes this connector still doesn't materialize (sub-resource
+// like KV secrets, Service Bus queues — follow-up work) we fall through to
+// the nearest parent we do emit.
 func scopeResourceTypeForAzureScope(scope string) string {
 	switch {
+	case strings.HasPrefix(scope, "/providers/Microsoft.Management/managementGroups/"):
+		return managementGroupResourceType.Id
 	case strings.HasPrefix(scope, "/subscriptions/") && strings.Contains(scope, "/resourceGroups/"):
 		return resourceGroupResourceType.Id
 	case strings.HasPrefix(scope, "/subscriptions/"):

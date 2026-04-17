@@ -105,9 +105,9 @@ func TestScopeResourceTypeForAzureScope(t *testing.T) {
 			want: tenantResourceType.Id,
 		},
 		{
-			name: "management-group scope not yet emitted as its own resource — falls through to tenant",
+			name: "management-group scope resolves to management_group type",
 			in:   "/providers/Microsoft.Management/managementGroups/c1connectors-root",
-			want: tenantResourceType.Id,
+			want: managementGroupResourceType.Id,
 		},
 		{
 			name: "empty string falls through to tenant",
