@@ -327,8 +327,19 @@ func (b *roleAssignmentBuilder) Grant(ctx context.Context, principal *v2.Resourc
 		return nil, fmt.Errorf("baton-azure-infrastructure: ScopeBindingTrait missing role or scope")
 	}
 
-	azurePrincipalType := batonToAzurePrincipalType(principal.Id.ResourceType)
-	if azurePrincipalType == "" {
+	// Gatekeeper: we accept only baton principal types Azure recognises
+	// (user / service principal / managed identity). Groups are rejected per
+	// baton-azure's policy ("C1 doesn't support provisioning to Groups").
+	//
+	// The resulting Azure principal-type string is unused further down: in the
+	// vendored armauthorization v1.0.0, the RoleAssignmentsClient.Create path
+	// uses RoleAssignmentProperties — a 2015-07-01-api-version struct with only
+	// PrincipalID + RoleDefinitionID, no PrincipalType field. Azure performs
+	// the principal-type lookup server-side at Create time. Bumping to a newer
+	// armauthorization major (v2.x) would let us pass PrincipalType explicitly
+	// and save the round-trip + support callers lacking Graph read — tracked
+	// as a follow-up SDK upgrade, out of scope here.
+	if batonToAzurePrincipalType(principal.Id.ResourceType) == "" {
 		return nil, fmt.Errorf("baton-azure-infrastructure: principal type %q not supported for role assignment grants (groups are unsupported by design)", principal.Id.ResourceType)
 	}
 
