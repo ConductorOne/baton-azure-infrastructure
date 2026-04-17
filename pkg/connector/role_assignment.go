@@ -254,15 +254,48 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 
 	// Flatten the dedup map to a stable slice.
 	//
-	// MEMORY NOTE: this List accumulates every role assignment in memory
-	// (stage-1 sub walk + stage-2 mgmt-group overwrite). Each resource is
-	// ~1-2 KB of proto + annotation, so a tenant with ~100K role
-	// assignments holds ~150-200 MB during sync. Typical enterprise
-	// tenants (tens of subs, ~10K assignments) are well under this; very
-	// large / hyperscale tenants need a streaming refactor to baton-sdk's
-	// pagination.Bag (tracked separately). We surface an operator WARN at
-	// 50K so large-tenant deployments get a visible heads-up rather than
-	// a silent OOM.
+	// =========================================================================
+	// MEMORY CHARACTERISTICS & SCALE NOTES
+	// =========================================================================
+	// This List accumulates every role_assignment resource in `byID` before
+	// returning. The two-stage walk (sub-and-below first, then mgmt-group-
+	// scope with stage-2 overwriting stage-1's lossy scope projection)
+	// cannot stream straight through baton-sdk pagination without losing
+	// the overwrite contract, so we buffer.
+	//
+	// Per-resource cost: ~1-2 KB (proto + ScopeBindingTrait annotation +
+	// string fields for displayName / description / scope ARM path).
+	//
+	// Scale projections:
+	//
+	//   Tenant profile                                    | N (role_assignments) | Buffered RAM
+	//   --------------------------------------------------+----------------------+--------------
+	//   Lab (this repo's lab tenant)                      |                   77 |      ~150 KB
+	//   SMB  (≤5 subs, one flat org)                      |               <1,000 |      <2   MB
+	//   Mid-market (20-50 subs, modest mgmt-group tree)   |        1,000-10,000  |     1.5-15 MB
+	//   Enterprise (50-500 subs, significant RG fanout)   |       10,000-100,000 |       15-200 MB
+	//   Large enterprise (many subs × descendant scopes)  |      100,000-500,000 |      200 MB-1 GB
+	//   Hyperscale (5K+ subs)                             |         1,000,000+   |      1.5 GB+
+	//
+	// (Descendant-scope assignments — e.g. per-KV-secret, per-queue, per-
+	// container scopes — multiply the count further if those scope resource
+	// types are emitted; NOTES.md item G tracks that extension.)
+	//
+	// Operator guidance: the WARN below fires at 50K buffered entries, which
+	// corresponds roughly to mid-enterprise scale and ~75 MB. At hyperscale
+	// this List would need either (a) a streaming refactor using
+	// baton-sdk's pagination.Bag with phase state + a seen-set persisted
+	// across calls, or (b) dropping the stage-2 overwrite entirely once we
+	// empirically verify Azure returns the actual (not projected) scope on
+	// stage-1 at api-version 2022-04-01 — in which case stage-2 becomes
+	// redundant and the single-pass walk streams cleanly.
+	//
+	// Follow-up: filed as a tracked issue on this PR. Do NOT fix it in a
+	// hot path without re-running the live Grant/Revoke integration test
+	// (pkg/connector/role_assignment_live_test.go, build tag `live`) —
+	// the stage-2 overwrite behavior is currently load-bearing for
+	// mgmt-group-scope bindings.
+	// =========================================================================
 	const largeTenantWarnAt = 50_000
 	if len(byID) >= largeTenantWarnAt {
 		l.Warn("baton-azure-infrastructure: role_assignment sync buffered a large number of assignments; memory pressure likely. File an issue to request pagination support.",
