@@ -55,6 +55,13 @@ var (
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP},
 	}
 
+	roleAssignmentResourceType = &v2.ResourceType{
+		Id:          "role_assignment",
+		DisplayName: "Role Assignment",
+		Description: "An Azure role assignment — a principal holding a role at a specific scope (subscription, resource group, or resource).",
+		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_SCOPE_BINDING},
+	}
+
 	roleResourceType = &v2.ResourceType{
 		Id:          "role",
 		DisplayName: "Role",

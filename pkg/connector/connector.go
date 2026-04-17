@@ -33,6 +33,7 @@ type Connector struct {
 	skipStorageContainerSync              bool
 	enableSyncExternalResourcesViaBatonID bool
 	skipEntraIDP2LicenseFeatures          bool
+	syncRoleAssignments                   bool
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
@@ -53,6 +54,14 @@ func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 		newRoleBuilder(d),
 		newStorageAccountBuilder(d),
 	)
+
+	// Opt-in: emit Azure role assignments as TRAIT_SCOPE_BINDING resources so
+	// the c1 uplift (PR ductone/c1#16540) can classify this app as SPARSE or
+	// HYBRID and route it through the sparse-ACL UX. Default-off so existing
+	// deployments don't silently re-classify on upgrade.
+	if d.syncRoleAssignments {
+		syncers = append(syncers, newRoleAssignmentBuilder(d))
+	}
 
 	if !d.skipStorageContainerSync {
 		syncers = append(syncers, newContainerBuilder(d))
@@ -92,6 +101,7 @@ func NewConnectorFromToken(
 	skipStorageContainerSync bool,
 	syncExternalResourcesViaBatonID bool,
 	skipEntraIDP2LicenseFeatures bool,
+	syncRoleAssignments bool,
 ) (*Connector, error) {
 	azureClient, err := client.NewAzureClient(ctx, httpClient, token, skipAdGroups, graphDomain)
 	if err != nil {
@@ -128,6 +138,7 @@ func NewConnectorFromToken(
 		roleDefinitionsClient:                 roleDefinitionsClient,
 		enableSyncExternalResourcesViaBatonID: syncExternalResourcesViaBatonID,
 		skipEntraIDP2LicenseFeatures:          skipEntraIDP2LicenseFeatures,
+		syncRoleAssignments:                   syncRoleAssignments,
 	}
 
 	return c, nil
@@ -147,6 +158,7 @@ func New(
 	skipStorageContainerSync bool,
 	enableSyncExternalResourcesViaBatonID bool,
 	skipEntraIDP2LicenseFeatures bool,
+	syncRoleAssignments bool,
 ) (*Connector, error) {
 	var cred azcore.TokenCredential
 	httpClient, err := uhttp.NewClient(
@@ -194,5 +206,6 @@ func New(
 		skipStorageContainerSync,
 		enableSyncExternalResourcesViaBatonID,
 		skipEntraIDP2LicenseFeatures,
+		syncRoleAssignments,
 	)
 }

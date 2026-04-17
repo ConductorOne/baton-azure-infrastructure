@@ -103,6 +103,7 @@ func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecre
 		false,
 		false,
 		false,
+		false, // syncRoleAssignments — default off
 	)
 
 	if err != nil {
