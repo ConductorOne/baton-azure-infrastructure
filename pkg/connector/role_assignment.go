@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -359,8 +360,20 @@ func (b *roleAssignmentBuilder) Grant(ctx context.Context, principal *v2.Resourc
 	}
 
 	principalID := principal.Id.Resource
+	if !isAzureGUID(principalID) {
+		// Defense against filter-smuggling: Azure $filter and role-assignment
+		// ARM paths interpolate principalID as a string. Everything originating
+		// from Azure is a GUID; if c1 forwards something else the only
+		// reasonable response is refuse.
+		return nil, fmt.Errorf("baton-azure-infrastructure: refusing Grant: principal id %q is not a GUID", principalID)
+	}
 	scope := scopeTrait.ScopeResourceId.Resource
-	roleDefinitionID := roleDefinitionIDForScope(scope, scopeTrait.RoleId.Resource)
+	// ScopeBindingTrait.role_id is the composite "<roleUUID>:<subscriptionID>"
+	// that roleBuilder emits (see helper.go:getRoleId). Azure's roleDefinition
+	// path takes only the UUID suffix — passing the composite produces an
+	// invalid path and a 400 from ARM. Strip first.
+	roleUUID := roleUUIDFromBindingRef(scopeTrait.RoleId.Resource)
+	roleDefinitionID := roleDefinitionIDForScope(scope, roleUUID)
 	subscriptionID := subscriptionFromScope(scope)
 	if subscriptionID == "" {
 		// Fall back to any sub the SP can see. Create()'s subscription ID param
@@ -426,6 +439,12 @@ func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annota
 	}
 
 	principalID := g.Principal.Id.Resource
+	if !isAzureGUID(principalID) {
+		// Defense against filter-smuggling: the $filter below interpolates
+		// principalID directly. Azure-origin IDs are always GUIDs; refuse
+		// anything else rather than risk widening the list scope.
+		return nil, fmt.Errorf("baton-azure-infrastructure: refusing Revoke: principal id %q is not a GUID", principalID)
+	}
 	scope := scopeTrait.ScopeResourceId.Resource
 	// ScopeBindingTrait.role_id is the composite "<roleUUID>:<subscriptionID>"
 	// that roleBuilder emits (see helper.go:getRoleId). Peel off the UUID for
@@ -710,6 +729,22 @@ func roleUUIDFromBindingRef(id string) string {
 		return id[:colon]
 	}
 	return id
+}
+
+// azureGUIDRegexp matches the canonical 8-4-4-4-12 hex representation that
+// Azure uses for object IDs (principal ID, role UUID, subscription ID). Used
+// by isAzureGUID for input validation on Grant/Revoke principal IDs before
+// those strings are interpolated into ARM $filter expressions or path
+// segments.
+var azureGUIDRegexp = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// isAzureGUID reports whether s is formatted like a canonical Azure object
+// GUID. Azure emits all principal IDs in this shape, so a non-match means the
+// caller is passing something we did not intend to proxy — either a bug or a
+// filter-injection attempt against ARM. Either way, refusing is safer than
+// interpolating.
+func isAzureGUID(s string) bool {
+	return azureGUIDRegexp.MatchString(s)
 }
 
 // parsePrincipalFromRoleAssignmentResourceID returns the principal ID portion

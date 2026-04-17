@@ -311,6 +311,39 @@ func TestRoleUUIDFromBindingRef(t *testing.T) {
 	}
 }
 
+// TestIsAzureGUID pins the input validator that guards Grant/Revoke against
+// filter-smuggling. Grant and Revoke interpolate principal IDs into ARM paths
+// and $filter expressions; anything that is not the canonical GUID shape
+// should be refused rather than forwarded.
+func TestIsAzureGUID(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"canonical lowercase GUID", "4d3a9fc4-022d-4db4-9215-4a25d2ece45a", true},
+		{"canonical uppercase GUID", "4D3A9FC4-022D-4DB4-9215-4A25D2ECE45A", true},
+		{"mixed case GUID", "4D3A9FC4-022d-4DB4-9215-4A25d2ECE45A", true},
+		{"empty string", "", false},
+		{"missing dashes", "4d3a9fc4022d4db492154a25d2ece45a", false},
+		{"too short", "4d3a9fc4-022d-4db4-9215-4a25d2ece45", false},
+		{"too long", "4d3a9fc4-022d-4db4-9215-4a25d2ece45ab", false},
+		{"non-hex char", "4d3a9fc4-022d-4db4-9215-4a25d2ece45g", false},
+		{"injection attempt with quote", "4d3a9fc4-022d-4db4-9215-4a25d2ece45a' or '1'='1", false},
+		{"injection attempt with filter", "x' or atScope() or '", false},
+		{"just text", "not-a-guid", false},
+		{"leading whitespace", " 4d3a9fc4-022d-4db4-9215-4a25d2ece45a", false},
+		{"trailing newline", "4d3a9fc4-022d-4db4-9215-4a25d2ece45a\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAzureGUID(tt.in); got != tt.want {
+				t.Errorf("isAzureGUID(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestScopeResourceTypeForAzureScope(t *testing.T) {
 	tests := []struct {
 		name string
