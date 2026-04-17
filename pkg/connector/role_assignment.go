@@ -52,8 +52,14 @@ func newRoleAssignmentBuilder(conn *Connector) *roleAssignmentBuilder {
 // caller can drop the grant without propagating the error (degrade-gracefully
 // pattern used elsewhere in this connector). Failures are logged at Warn so
 // dropped grants are visible in production (Debug would hide silent data
-// loss); Warn fires at most once per principal because successful lookups
-// populate the cache.
+// loss).
+//
+// The cache holds negative results too: when a lookup returns "" (either the
+// fallback chain was exhausted or it errored), we still store "" so subsequent
+// bindings for the same principal don't re-query Graph. Without this, a single
+// tenancy-foreign principal that holds N role assignments produces N Graph
+// roundtrips and N Warn log lines — enough to swamp operator logs on customer
+// syncs.
 func (b *roleAssignmentBuilder) principalTypeForID(ctx context.Context, principalID string) string {
 	if v, ok := b.principalTypeCache.Load(principalID); ok {
 		if s, ok := v.(string); ok {
@@ -67,6 +73,9 @@ func (b *roleAssignmentBuilder) principalTypeForID(ctx context.Context, principa
 			zap.String("principal_id", principalID),
 			zap.Error(err),
 		)
+		// Cache the miss so we don't re-query on every subsequent role
+		// assignment that references this principal.
+		b.principalTypeCache.Store(principalID, "")
 		return ""
 	}
 	b.principalTypeCache.Store(principalID, pt)
@@ -98,6 +107,8 @@ func (b *roleAssignmentBuilder) ResourceType(_ context.Context) *v2.ResourceType
 // empty + no error (degrade-gracefully pattern) and List continues with
 // stage-1 coverage only.
 func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
 	// Map keyed by resource.Id.Resource (= "<assignmentName>@<principalID>").
 	// Stage-1 populates; stage-2 overwrites when it finds a better scope.
 	byID := make(map[string]*v2.Resource)
@@ -135,9 +146,20 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 				return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role assignments client: %w", err)
 			}
 			raPager := raClient.NewListForSubscriptionPager(nil)
+		subPager:
 			for raPager.More() {
 				raPage, err := raPager.NextPage(ctx)
 				if err != nil {
+					// Mixed-permission tenants (a common enterprise shape) have
+					// subs where the SP can enumerate the subscription itself
+					// but lacks Microsoft.Authorization/roleAssignments/read on
+					// that sub. 403 here should degrade gracefully (same pattern
+					// used by the mgmt-group walk below and by baton-azure).
+					if isForbidden(err) {
+						l.Warn("baton-azure-infrastructure: forbidden listing role assignments for sub; skipping",
+							zap.String("subID", subID), zap.Error(err))
+						break subPager
+					}
 					return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments for sub %s: %w", subID, err)
 				}
 				for _, ra := range raPage.Value {
@@ -158,7 +180,6 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 	// armauthorization.RoleAssignmentsClient needs a subscription ID for
 	// construction even though NewListForScopePager accepts any scope; reuse
 	// firstSubID from stage 1. If no subscriptions were visible, skip stage 2.
-	l := ctxzap.Extract(ctx)
 	if firstSubID != "" {
 		mgs, err := listManagementGroups(ctx, b.conn.token, b.conn.client.ArmOptions())
 		if err != nil {
@@ -243,7 +264,12 @@ func (b *roleAssignmentBuilder) Entitlements(_ context.Context, resource *v2.Res
 			roleAssignmentAssignedEntitlementSlug,
 			ent.WithDisplayName(fmt.Sprintf("Assigned: %s", resource.DisplayName)),
 			ent.WithDescription(fmt.Sprintf("Principals assigned to this role binding (%s)", resource.DisplayName)),
-			ent.WithGrantableTo(userResourceType, groupResourceType, managedIdentitylResourceType, enterpriseApplicationResourceType),
+			// Groups are intentionally omitted from GrantableTo: baton-azure's
+			// policy (matched by batonToAzurePrincipalType below) rejects group
+			// principals at Grant time. Advertising groups here would show
+			// "Grant to group" in the c1 UI and then fail at provision with a
+			// confusing error.
+			ent.WithGrantableTo(userResourceType, managedIdentitylResourceType, enterpriseApplicationResourceType),
 		),
 	}, "", nil, nil
 }
@@ -372,13 +398,23 @@ func (b *roleAssignmentBuilder) Grant(ctx context.Context, principal *v2.Resourc
 	return nil, nil
 }
 
-// Revoke removes the principal's grant on a role_assignment binding. Finds the
-// actual Azure role assignment by querying at the binding's scope, then
-// DELETE's by name. Idempotent: returns GrantAlreadyRevoked if the assignment
-// is not found.
+// Revoke removes the principal's role assignment at the binding's scope.
+//
+// The Azure assignment name baked into the binding's resource ID (the
+// "<name>@<principalID>" prefix) identifies the *originally-synced* assignment
+// — not any assignment subsequently created by Grant, which generates a fresh
+// UUID each call. Using that name for DELETE would revoke the wrong principal
+// whenever Revoke fires between a Grant and the next resync. Instead we query
+// at scope by principal, match the role locally, and DELETE by the discovered
+// assignment name — matching baton-azure's Revoke pattern.
+//
+// Idempotent: if no matching assignment is found, returns GrantAlreadyRevoked.
 func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annotations.Annotations, error) {
 	if g == nil || g.Principal == nil || g.Entitlement == nil || g.Entitlement.Resource == nil {
 		return nil, fmt.Errorf("baton-azure-infrastructure: grant missing principal or entitlement")
+	}
+	if g.Principal.Id == nil || g.Principal.Id.Resource == "" {
+		return nil, fmt.Errorf("baton-azure-infrastructure: grant principal missing id")
 	}
 
 	scopeTrait, err := rs.GetScopeBindingTrait(g.Entitlement.Resource)
@@ -389,16 +425,17 @@ func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annota
 		return nil, fmt.Errorf("baton-azure-infrastructure: ScopeBindingTrait missing role or scope")
 	}
 
-	// The baton resource ID for a role_assignment is "<assignmentName>@<principalID>",
-	// so we can recover the Azure assignment name directly without a round-trip.
-	rid := g.Entitlement.Resource.Id.Resource
-	atIdx := strings.LastIndex(rid, "@")
-	if atIdx <= 0 {
-		return nil, fmt.Errorf("baton-azure-infrastructure: role_assignment resource id %q has no assignment-name prefix", rid)
-	}
-	assignmentName := rid[:atIdx]
-
+	principalID := g.Principal.Id.Resource
 	scope := scopeTrait.ScopeResourceId.Resource
+	// ScopeBindingTrait.role_id is the composite "<roleUUID>:<subscriptionID>"
+	// that roleBuilder emits (see helper.go:getRoleId). Peel off the UUID for
+	// role-matching below; Azure role assignments store the full definition
+	// path whose last segment is the UUID.
+	roleUUID := scopeTrait.RoleId.Resource
+	if colon := strings.Index(roleUUID, ":"); colon > 0 {
+		roleUUID = roleUUID[:colon]
+	}
+
 	subscriptionID := subscriptionFromScope(scope)
 	if subscriptionID == "" {
 		s, err := firstVisibleSubscription(ctx, b.conn)
@@ -413,14 +450,48 @@ func (b *roleAssignmentBuilder) Revoke(ctx context.Context, g *v2.Grant) (annota
 		return nil, fmt.Errorf("baton-azure-infrastructure: role assignments client: %w", err)
 	}
 
+	// Azure $filter for role_assignments supports `atScope()` and
+	// `principalId eq '{guid}'`; it does NOT support a role_definition filter,
+	// so we match the role UUID locally. In practice each (principal, scope)
+	// pair holds at most a handful of assignments so this is cheap.
+	filter := fmt.Sprintf("atScope() and principalId eq '%s'", principalID)
+	pager := raClient.NewListForScopePager(scope, &armauthorization.RoleAssignmentsClientListForScopeOptions{
+		Filter: &filter,
+	})
+	var assignmentName string
+	for pager.More() && assignmentName == "" {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			if isNotFound(err) {
+				return annotations.New(&v2.GrantAlreadyRevoked{}), nil
+			}
+			return nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments for revoke (scope=%s principal=%s): %w",
+				scope, principalID, err)
+		}
+		for _, ra := range page.Value {
+			if ra == nil || ra.Properties == nil || ra.Name == nil || ra.Properties.RoleDefinitionID == nil {
+				continue
+			}
+			if path.Base(*ra.Properties.RoleDefinitionID) == roleUUID {
+				assignmentName = *ra.Name
+				break
+			}
+		}
+	}
+
+	if assignmentName == "" {
+		// No assignment for this (principal, role) at scope — already revoked
+		// or never existed.
+		return annotations.New(&v2.GrantAlreadyRevoked{}), nil
+	}
+
 	_, err = raClient.Delete(ctx, scope, assignmentName, nil)
 	if err != nil {
-		// Azure's DELETE at this endpoint is idempotent at the API level: a
-		// non-existent assignment returns 204 No Content, not 404, so a nil
-		// err path here is the common "already revoked" case (no annotation
-		// needed — bare nil is success). The 404 branch is still kept as
-		// defense-in-depth for edge cases (malformed scope, api-version skew,
-		// etc.) so the SDK surfaces the "gone" signal cleanly.
+		// Race: another deleter removed the assignment between list and
+		// delete. ARM's DELETE is documented as returning 204 on a missing
+		// assignment, so this nil-error path is the common "already gone"
+		// case; 404 is kept as defense-in-depth for malformed scope or
+		// api-version skew.
 		if isNotFound(err) {
 			return annotations.New(&v2.GrantAlreadyRevoked{}), nil
 		}

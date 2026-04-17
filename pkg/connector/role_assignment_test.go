@@ -167,6 +167,30 @@ func TestPrincipalTypeCache_HitReturnsStoredValue(t *testing.T) {
 	}
 }
 
+func TestPrincipalTypeCache_NegativeHitReturnsEmpty(t *testing.T) {
+	// Covers the negative-cache path: once getPrincipalType has failed or
+	// returned "" for a principal, subsequent lookups must return "" without
+	// re-querying Graph. Without this the same principal triggers a full
+	// fallback-chain attempt (and a Warn log) on every role assignment that
+	// references it, flooding operator logs at customer scale.
+	b := &roleAssignmentBuilder{}
+	const pid = "00000000-0000-0000-0000-000000000000"
+	b.principalTypeCache.Store(pid, "")
+
+	ctx := context.Background()
+
+	got := b.principalTypeForID(ctx, pid)
+	if got != "" {
+		t.Errorf("principalTypeForID negative-cache hit returned %q, want empty string", got)
+	}
+
+	// Second call must still hit the cache (no promotion, no eviction).
+	got = b.principalTypeForID(ctx, pid)
+	if got != "" {
+		t.Errorf("principalTypeForID second negative-cache hit returned %q, want empty string", got)
+	}
+}
+
 func TestParsePrincipalFromRoleAssignmentResourceID(t *testing.T) {
 	tests := []struct {
 		name   string
