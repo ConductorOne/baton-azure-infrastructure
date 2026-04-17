@@ -523,22 +523,34 @@ func roleAssignmentResource(subscriptionID string, ra *armauthorization.RoleAssi
 	// reconstruct the grant without a second ARM roundtrip.
 	resourceID := fmt.Sprintf("%s@%s", *ra.Name, *props.PrincipalID)
 
-	// role_id points at the role_definition resource. baton-azure stores roles
-	// keyed by their UUID (last path segment of the roleDefinitionId ARM path),
-	// so we match that here so principal→role joins work cross-connector.
+	// role_id points at the role_definition resource. This connector's roleBuilder
+	// (pkg/connector/role.go + helper.go:getRoleId) emits role resources with
+	// composite IDs of the form "<roleUUID>:<subscriptionID>" — not bare UUIDs —
+	// so the ScopeBindingTrait reference has to match that format exactly or c1
+	// cannot resolve the role from the binding. We build the same composite here
+	// using the current subscription context.
 	roleUUID := path.Base(*props.RoleDefinitionID)
+	roleResourceID := fmt.Sprintf("%s:%s", roleUUID, subscriptionID)
 	roleScopeResourceID := &v2.ResourceId{
 		ResourceType: roleResourceType.Id,
-		Resource:     roleUUID,
+		Resource:     roleResourceID,
 	}
 
-	// scope_resource_id points at whatever scope level the assignment lives at.
-	// For scopes this connector doesn't emit as resources (mgmt groups, tenant
-	// root, fine-grained sub-resource), the reference still carries the raw ARM
-	// path so c1 can navigate / label even without a materialized resource.
+	// scope_resource_id must reference a resource ID in the format the matching
+	// resource type's builder actually emits — otherwise c1 sees a dangling
+	// reference and can't resolve the binding's scope for display or tree
+	// navigation. The builders in this connector emit:
+	//   - subscription resources  → ID = bare subscription GUID
+	//   - resource_group resources → ID = bare RG name (not ARM path)
+	//   - management_group resources → ID = full ARM path (what managementGroupResource emits)
+	// Sub-resource scopes (KV secret / storage container / SB queue) have no
+	// dedicated resource type yet; we fall back to the parent RG name so at
+	// least the ancestor resolves. This is a documented follow-up (NOTES.md
+	// item B — sub-resource resource types).
+	scopeTypeID, scopeIDValue := scopeResourceRefFromAzureScope(*props.Scope)
 	scopeResourceID := &v2.ResourceId{
-		ResourceType: scopeResourceTypeForAzureScope(*props.Scope),
-		Resource:     *props.Scope,
+		ResourceType: scopeTypeID,
+		Resource:     scopeIDValue,
 	}
 
 	scopeBindingOpts := []rs.ScopeBindingTraitOption{
@@ -566,15 +578,50 @@ func roleAssignmentResource(subscriptionID string, ra *armauthorization.RoleAssi
 // like KV secrets, Service Bus queues — follow-up work) we fall through to
 // the nearest parent we do emit.
 func scopeResourceTypeForAzureScope(scope string) string {
+	t, _ := scopeResourceRefFromAzureScope(scope)
+	return t
+}
+
+// scopeResourceRefFromAzureScope returns (resourceType, resourceID) for an
+// ARM scope, where resourceID matches exactly what the corresponding
+// resource-type's builder emits as its id — otherwise the ScopeBindingTrait
+// reference dangles in the c1z. Extraction rules per type:
+//
+//   - management_group → full ARM path (managementGroupResource emits ID = mg.ID)
+//   - resource_group   → bare RG name (resourceGroupBuilder emits ID = rg.Name)
+//   - subscription     → bare subscription GUID (subscriptionBuilder emits ID = subID)
+//   - anything below an RG (sub-resource scope: KV secret, storage container,
+//     SB queue, etc.) → falls back to the parent RG so at least the ancestor
+//     resolves; follow-up work (NOTES.md item B) will materialize these as
+//     dedicated resource types with their own IDs.
+//   - tenant root / unknown → tenant type with the raw scope as ID (best-effort
+//     until a richer tenant/root model exists).
+func scopeResourceRefFromAzureScope(scope string) (string, string) {
+	const mgPrefix = "/providers/Microsoft.Management/managementGroups/"
+	const subPrefix = "/subscriptions/"
+	const rgToken = "/resourceGroups/"
+
 	switch {
-	case strings.HasPrefix(scope, "/providers/Microsoft.Management/managementGroups/"):
-		return managementGroupResourceType.Id
-	case strings.HasPrefix(scope, "/subscriptions/") && strings.Contains(scope, "/resourceGroups/"):
-		return resourceGroupResourceType.Id
-	case strings.HasPrefix(scope, "/subscriptions/"):
-		return subscriptionsResourceType.Id
+	case strings.HasPrefix(scope, mgPrefix):
+		return managementGroupResourceType.Id, scope
+	case strings.HasPrefix(scope, subPrefix):
+		rest := scope[len(subPrefix):]
+		subID := rest
+		if i := strings.Index(rest, "/"); i >= 0 {
+			subID = rest[:i]
+		}
+		// Is there a resourceGroups/<rgName> segment?
+		if idx := strings.Index(scope, rgToken); idx >= 0 {
+			after := scope[idx+len(rgToken):]
+			rgName := after
+			if j := strings.Index(after, "/"); j >= 0 {
+				rgName = after[:j]
+			}
+			return resourceGroupResourceType.Id, rgName
+		}
+		return subscriptionsResourceType.Id, subID
 	default:
-		return tenantResourceType.Id
+		return tenantResourceType.Id, scope
 	}
 }
 

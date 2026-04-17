@@ -287,3 +287,61 @@ func TestMapGraphPrincipalTypeToBaton(t *testing.T) {
 		})
 	}
 }
+
+func TestScopeResourceRefFromAzureScope(t *testing.T) {
+	tests := []struct {
+		name     string
+		scope    string
+		wantType string
+		wantID   string
+	}{
+		{
+			name:     "subscription-only scope → bare sub GUID",
+			scope:    "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0",
+			wantType: subscriptionsResourceType.Id,
+			wantID:   "0ba3df83-67b5-4a08-a561-e65fa74a1aa0",
+		},
+		{
+			name:     "RG scope → bare RG name",
+			scope:    "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0/resourceGroups/rg-apps-web-prd",
+			wantType: resourceGroupResourceType.Id,
+			wantID:   "rg-apps-web-prd",
+		},
+		{
+			name:     "KV-secret sub-resource scope → parent RG name (follow-up: own resource type)",
+			scope:    "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0/resourceGroups/rg-apps-api-prd/providers/Microsoft.KeyVault/vaults/kv-apps-api-prd/secrets/portal-db-conn",
+			wantType: resourceGroupResourceType.Id,
+			wantID:   "rg-apps-api-prd",
+		},
+		{
+			name: "storage-container scope → parent RG name",
+			scope: "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0" +
+				"/resourceGroups/rg-data-lake-prd" +
+				"/providers/Microsoft.Storage/storageAccounts/stc1labbronze" +
+				"/blobServices/default/containers/raw",
+			wantType: resourceGroupResourceType.Id,
+			wantID:   "rg-data-lake-prd",
+		},
+		{
+			name:     "mgmt-group scope → full ARM path (matches mgmt_group builder's emission)",
+			scope:    "/providers/Microsoft.Management/managementGroups/c1connectors-root",
+			wantType: managementGroupResourceType.Id,
+			wantID:   "/providers/Microsoft.Management/managementGroups/c1connectors-root",
+		},
+		{
+			name:     "tenant root → tenant type, raw scope as id",
+			scope:    "/",
+			wantType: tenantResourceType.Id,
+			wantID:   "/",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, gotID := scopeResourceRefFromAzureScope(tt.scope)
+			if gotType != tt.wantType || gotID != tt.wantID {
+				t.Errorf("scopeResourceRefFromAzureScope(%q) = (%q, %q), want (%q, %q)",
+					tt.scope, gotType, gotID, tt.wantType, tt.wantID)
+			}
+		})
+	}
+}
