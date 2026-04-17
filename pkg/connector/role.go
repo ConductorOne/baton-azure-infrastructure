@@ -341,8 +341,13 @@ func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID s
 		})
 
 		for _, assignment := range page.Value {
-			if assignment.Properties == nil && assignment.Properties.RoleDefinitionID != nil {
-				l.Warn("baton-azure-infrastructure: role assignment properties are nil")
+			// Original guard was `Properties == nil && RoleDefinitionID != nil`,
+			// which meant the inner dereference on the second clause would panic
+			// *exactly* when the outer nil-check was true. Needs to be `||` with
+			// `== nil` on both sides: skip when either Properties or the
+			// RoleDefinitionID pointer is missing.
+			if assignment.Properties == nil || assignment.Properties.RoleDefinitionID == nil {
+				l.Warn("baton-azure-infrastructure: role assignment properties or role definition id are nil")
 				continue
 			}
 
