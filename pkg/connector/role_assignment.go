@@ -143,8 +143,16 @@ type raBagState struct {
 //
 // **Memory characteristics (this refactor):**
 //
-//	Peak in-memory per List call: one subscription's assignments × ~1.5 KB
-//	  (typical 100-500 assignments → 150-750 KB; hyperscale sub ~10k → ~15 MB)
+//	Peak in-memory per List call — steady state (phase "sub"): one
+//	  subscription's assignments × ~1.5 KB (typical 100-500 assignments
+//	  → 150-750 KB; hyperscale sub ~10k → ~15 MB).
+//	Peak in-memory per List call — first call (phase "init"): ALL mgmt-
+//	  group-scope assignments across every visible mgmt group are
+//	  emitted in a single page. In practice mgmt-group-scope assignment
+//	  counts are small (lab: 2; enterprise: typically <100) so this is
+//	  a one-shot burst. A tenant with thousands of mgmt-group-scope
+//	  assignments would need the init phase paginated further; not a
+//	  concern for current customer shapes.
 //	State carried between calls: list of pending sub IDs + seen-set of
 //	  mgmt-group-scope names, bounded at ~216 KB in the worst mainstream
 //	  case (5K subs + 1K mgmt-scope assignments).
@@ -319,7 +327,13 @@ func (b *roleAssignmentBuilder) listSubPage(ctx context.Context, l *zap.Logger, 
 					// may return (nil, nil) for malformed input even if the
 					// name passed shouldEmitRoleAssignment's shape checks;
 					// keep the seen-set entry we just added so we don't
-					// retry on a future page for the same name.
+					// retry on a later Azure pager page *within this same
+					// List call* for the same name. (The seen-set is
+					// reconstructed from state.SeenAssignmentNames on every
+					// List call and only carries mgmt-group-scope names
+					// across calls — sub-scope names don't need cross-call
+					// dedup because each sub is visited exactly once per
+					// sync.)
 					continue
 				}
 				emitted = append(emitted, resource)

@@ -11,6 +11,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -813,4 +814,52 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestListSubPage_PreservesSeenSetAcrossSubTransition pins the cross-call
+// dedup invariant that's load-bearing for the streaming refactor: the
+// mgmt-group-scope assignment names collected in the init phase must
+// survive every sub → sub transition unchanged, otherwise those
+// assignments would be emitted again during the sub walk.
+//
+// We drive listSubPage directly with CurrentSub="" to short-circuit the
+// Azure client construction and exercise just the advance-and-push tail,
+// which is the part the code-review agent flagged as untested.
+func TestListSubPage_PreservesSeenSetAcrossSubTransition(t *testing.T) {
+	seenNames := []string{
+		"5099ae91-7a64-44b0-b7bf-e5c81463ed4d",
+		"ec8532c6-aa52-4b4c-8326-41ce1bc4b79b",
+	}
+	state := &raBagState{
+		Phase:               raPhaseSub,
+		PendingSubs:         []string{"sub-a", "sub-b", "sub-c"},
+		CurrentSub:          "", // empty — short-circuits Azure work, exercises tail only.
+		SeenAssignmentNames: seenNames,
+	}
+
+	bag := &pagination.GenBag[raBagState]{}
+	b := &roleAssignmentBuilder{}
+
+	emitted, tok, _, err := b.listSubPage(context.Background(), zap.NewNop(), bag, state)
+	if err != nil {
+		t.Fatalf("listSubPage: %v", err)
+	}
+	if len(emitted) != 0 {
+		t.Errorf("expected no resources emitted when CurrentSub empty, got %d", len(emitted))
+	}
+	if tok == "" {
+		t.Fatalf("expected non-empty token — bag should still have pending subs to process")
+	}
+
+	next := bag.Current()
+	if next == nil {
+		t.Fatalf("expected bag to carry a follow-up state; got nil")
+	}
+	if !reflect.DeepEqual(next.SeenAssignmentNames, seenNames) {
+		t.Errorf("SeenAssignmentNames lost across sub transition.\n got:  %v\n want: %v",
+			next.SeenAssignmentNames, seenNames)
+	}
+	if next.CurrentSub != "sub-a" {
+		t.Errorf("expected advance to first pending sub-a, got CurrentSub=%q", next.CurrentSub)
+	}
 }
