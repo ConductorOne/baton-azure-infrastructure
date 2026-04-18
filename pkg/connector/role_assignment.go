@@ -25,7 +25,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const roleAssignmentAssignedEntitlementSlug = "assigned"
+// roleAssignmentAssignedEntitlementSlug aliases the shared `typeAssigned`
+// constant (defined in group.go) so code in this file that reads like "the
+// slug of the assigned entitlement on a role_assignment binding" is greppable
+// by intent rather than by bare string. Same underlying value ("assigned").
+const roleAssignmentAssignedEntitlementSlug = typeAssigned
 
 // roleAssignmentBuilder emits one resource per actual Azure role assignment
 // visible to the SP, carrying a ScopeBindingTrait annotation that pairs the
@@ -200,6 +204,9 @@ func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag
 	subsPager := b.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
 	var pendingSubs []string
 	for subsPager.More() {
+		if err := ctx.Err(); err != nil {
+			return nil, "", nil, err
+		}
 		subsPage, err := subsPager.NextPage(ctx)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing subscriptions: %w", err)
@@ -231,12 +238,18 @@ func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag
 				return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role assignments client for mgmt-group walk: %w", err)
 			}
 			for _, mg := range mgs {
+				if err := ctx.Err(); err != nil {
+					return nil, "", nil, err
+				}
 				if mg == nil || mg.ID == nil {
 					continue
 				}
 				mgScope := *mg.ID
 				pager := raClient.NewListForScopePager(mgScope, nil)
 				for pager.More() {
+					if err := ctx.Err(); err != nil {
+						return nil, "", nil, err
+					}
 					page, pagerErr := pager.NextPage(ctx)
 					if pagerErr != nil {
 						// Degrade gracefully on per-mgmt-group 403 (common
@@ -303,6 +316,9 @@ func (b *roleAssignmentBuilder) listSubPage(ctx context.Context, l *zap.Logger, 
 		pager := raClient.NewListForSubscriptionPager(nil)
 	subPager:
 		for pager.More() {
+			if err := ctx.Err(); err != nil {
+				return nil, "", nil, err
+			}
 			page, pagerErr := pager.NextPage(ctx)
 			if pagerErr != nil {
 				// Graceful 403 on a sub we can see but can't read
@@ -456,13 +472,23 @@ func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resourc
 	}
 	principalResourceType := mapGraphPrincipalTypeToBaton(principalType)
 	if principalResourceType == "" {
+		// Principal type resolved from Graph, but the baton mapping doesn't
+		// know it (e.g. a directory-type this connector doesn't model yet).
+		// Log at Warn so dropped grants are visible — parallel to the
+		// getPrincipalType-failure Warn inside principalTypeForID.
+		ctxzap.Extract(ctx).Warn(
+			"baton-azure-infrastructure: unknown principal type from Graph; dropping grant for this binding",
+			zap.String("principal_type", principalType),
+			zap.String("principal_id", principalID),
+			zap.String("role_assignment_resource_id", resource.Id.Resource),
+		)
 		return nil, "", nil, nil
 	}
 	principalResourceID := &v2.ResourceId{
 		ResourceType: principalResourceType,
 		Resource:     principalID,
 	}
-	gr := grant.NewGrant(resource, roleAssignmentAssignedEntitlementSlug, principalResourceID)
+	gr := grant.NewGrant(resource, typeAssigned, principalResourceID)
 	return []*v2.Grant{gr}, "", nil, nil
 }
 
