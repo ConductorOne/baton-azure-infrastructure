@@ -307,18 +307,19 @@ func (b *roleAssignmentBuilder) listSubPage(ctx context.Context, l *zap.Logger, 
 				return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments for sub %s: %w", subID, pagerErr)
 			}
 			for _, ra := range page.Value {
-				if ra == nil || ra.Properties == nil || ra.Name == nil {
+				if !shouldEmitRoleAssignment(ra, seen) {
 					continue
 				}
-				if _, dup := seen[*ra.Name]; dup {
-					continue
-				}
-				seen[*ra.Name] = struct{}{}
 				resource, resErr := roleAssignmentResource(subID, ra)
 				if resErr != nil {
 					return nil, "", nil, resErr
 				}
 				if resource == nil {
+					// Unlike the seen-set short-circuit, roleAssignmentResource
+					// may return (nil, nil) for malformed input even if the
+					// name passed shouldEmitRoleAssignment's shape checks;
+					// keep the seen-set entry we just added so we don't
+					// retry on a future page for the same name.
 					continue
 				}
 				emitted = append(emitted, resource)
@@ -326,21 +327,48 @@ func (b *roleAssignmentBuilder) listSubPage(ctx context.Context, l *zap.Logger, 
 		}
 	}
 
-	// Advance: drop the sub we just processed, push the next.
-	remaining := state.PendingSubs
-	if len(remaining) > 0 && remaining[0] == subID {
-		remaining = remaining[1:]
-	}
-	if len(remaining) > 0 {
+	// Advance to the next pending sub (or signal completion).
+	nextSub, remaining := advancePendingSubs(subID, state.PendingSubs)
+	if nextSub != "" {
 		bag.Push(raBagState{
 			Phase:               raPhaseSub,
 			PendingSubs:         remaining,
-			CurrentSub:          remaining[0],
+			CurrentSub:          nextSub,
 			SeenAssignmentNames: state.SeenAssignmentNames,
 		})
 	}
 
 	return finishPage(bag, emitted)
+}
+
+// shouldEmitRoleAssignment is the dedup gate used by listSubPage: it
+// rejects nil / malformed assignments and assignments whose names are
+// already in `seen`, and records successful candidates in the set. Kept
+// as a pure helper for unit-testability without mocking the Azure SDK.
+func shouldEmitRoleAssignment(ra *armauthorization.RoleAssignment, seen map[string]struct{}) bool {
+	if ra == nil || ra.Properties == nil || ra.Name == nil {
+		return false
+	}
+	if _, dup := seen[*ra.Name]; dup {
+		return false
+	}
+	seen[*ra.Name] = struct{}{}
+	return true
+}
+
+// advancePendingSubs drops the just-processed sub (if it still heads
+// the pending list — defensive against callers that reorder) and
+// returns the next sub to visit plus the updated pending list. A "",
+// nil return signals end-of-walk.
+func advancePendingSubs(justProcessed string, pending []string) (string, []string) {
+	remaining := pending
+	if len(remaining) > 0 && remaining[0] == justProcessed {
+		remaining = remaining[1:]
+	}
+	if len(remaining) == 0 {
+		return "", nil
+	}
+	return remaining[0], remaining
 }
 
 // finishPage serializes the bag and returns the (resources, nextToken,

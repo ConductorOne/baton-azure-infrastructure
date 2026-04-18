@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
+	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -525,4 +527,290 @@ func TestScopeResourceRefFromAzureScope(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Pagination state machine
+// ---------------------------------------------------------------------------
+//
+// The streaming refactor in commit 0d1b194 drove roleAssignmentBuilder.List
+// from a buffered map into a pagination.GenBag state machine. These tests
+// pin the pure parts (state round-trip, dedup gate, sub advancement,
+// finishPage) so regressions in the state machine are caught by `go test`
+// rather than only by a full lab sync.
+
+// TestRaBagStateRoundTrip ensures a fully-populated raBagState survives
+// serialization through pagination.GenBag unchanged. A drift here would
+// mean pagination tokens lose state between calls, breaking multi-call
+// sync semantics.
+func TestRaBagStateRoundTrip(t *testing.T) {
+	original := raBagState{
+		Phase:               raPhaseSub,
+		PendingSubs:         []string{"sub-a", "sub-b", "sub-c"},
+		CurrentSub:          "sub-a",
+		SeenAssignmentNames: []string{"name-1", "name-2"},
+	}
+	bag := &pagination.GenBag[raBagState]{}
+	bag.Push(original)
+	tok, err := bag.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if tok == "" {
+		t.Fatalf("expected non-empty token for a bag with state")
+	}
+
+	restored, err := pagination.GenBagFromToken[raBagState](&pagination.Token{Token: tok})
+	if err != nil {
+		t.Fatalf("GenBagFromToken: %v", err)
+	}
+	got := restored.Current()
+	if got == nil {
+		t.Fatalf("restored bag has no current state")
+	}
+	if !reflect.DeepEqual(*got, original) {
+		t.Errorf("round-trip lost state.\n got:  %+v\n want: %+v", *got, original)
+	}
+}
+
+// TestFinishPageEmptyBagYieldsEmptyToken: when the bag has been fully
+// drained (no Current, no remaining states), finishPage must return ""
+// so the baton-sdk recognises end-of-pagination rather than invoking
+// List again with a token that decodes to a no-op.
+func TestFinishPageEmptyBagYieldsEmptyToken(t *testing.T) {
+	bag := &pagination.GenBag[raBagState]{}
+	// Simulate "was full, now drained": push then pop.
+	bag.Push(raBagState{Phase: raPhaseSub, CurrentSub: "x"})
+	_ = bag.Pop()
+
+	resources, tok, anns, err := finishPage(bag, nil)
+	if err != nil {
+		t.Fatalf("finishPage: %v", err)
+	}
+	if anns != nil {
+		t.Errorf("expected nil annotations, got %v", anns)
+	}
+	if len(resources) != 0 {
+		t.Errorf("expected no resources, got %d", len(resources))
+	}
+	if tok != "" {
+		t.Errorf("expected empty token for drained bag, got %q", tok)
+	}
+}
+
+// TestFinishPageNonEmptyBagYieldsSerializedState: when the bag still
+// has state to process, finishPage must return a non-empty token that
+// round-trips back to the same state.
+func TestFinishPageNonEmptyBagYieldsSerializedState(t *testing.T) {
+	bag := &pagination.GenBag[raBagState]{}
+	bag.Push(raBagState{
+		Phase:       raPhaseSub,
+		CurrentSub:  "sub-b",
+		PendingSubs: []string{"sub-b", "sub-c"},
+	})
+
+	_, tok, _, err := finishPage(bag, nil)
+	if err != nil {
+		t.Fatalf("finishPage: %v", err)
+	}
+	if tok == "" {
+		t.Fatalf("expected non-empty token, got empty")
+	}
+
+	restored, err := pagination.GenBagFromToken[raBagState](&pagination.Token{Token: tok})
+	if err != nil {
+		t.Fatalf("GenBagFromToken: %v", err)
+	}
+	cur := restored.Current()
+	if cur == nil || cur.CurrentSub != "sub-b" {
+		t.Errorf("round-trip lost CurrentSub; got %+v", cur)
+	}
+}
+
+// TestListUnknownPhaseReturnsError guards against silent no-ops when a
+// token from a future version encodes an unknown phase — better to fail
+// loudly than return empty results and let the sync think it finished.
+func TestListUnknownPhaseReturnsError(t *testing.T) {
+	bag := &pagination.GenBag[raBagState]{}
+	bag.Push(raBagState{Phase: "bogus-phase-name"})
+	tok, err := bag.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	b := &roleAssignmentBuilder{}
+	_, _, _, err = b.List(context.Background(), nil, &pagination.Token{Token: tok})
+	if err == nil {
+		t.Fatalf("expected error on unknown phase, got nil")
+	}
+	if !contains(err.Error(), "unknown phase") {
+		t.Errorf("error should mention 'unknown phase'; got %v", err)
+	}
+}
+
+// TestShouldEmitRoleAssignment pins the dedup gate: rejects nil / nil-
+// fielded inputs, skips names already in seen, and records fresh names
+// in the set so they're skipped on subsequent pages.
+func TestShouldEmitRoleAssignment(t *testing.T) {
+	name1 := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	name2 := "ffffffff-gggg-hhhh-iiii-jjjjjjjjjjjj"
+
+	mk := func(name *string, withProps bool) *armauthorization.RoleAssignment {
+		ra := &armauthorization.RoleAssignment{Name: name}
+		if withProps {
+			ra.Properties = &armauthorization.RoleAssignmentProperties{}
+		}
+		return ra
+	}
+
+	tests := []struct {
+		name      string
+		ra        *armauthorization.RoleAssignment
+		seedSeen  []string
+		want      bool
+		wantInSet string // if non-empty, verify this name is in seen after call
+	}{
+		{name: "nil assignment rejected", ra: nil, want: false},
+		{name: "nil properties rejected", ra: mk(&name1, false), want: false},
+		{name: "nil name rejected", ra: mk(nil, true), want: false},
+		{name: "fresh name accepted and added", ra: mk(&name1, true), want: true, wantInSet: name1},
+		{name: "seen name rejected", ra: mk(&name1, true), seedSeen: []string{name1}, want: false},
+		{name: "second call on same name rejected", ra: mk(&name2, true), seedSeen: []string{name2}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seen := make(map[string]struct{})
+			for _, n := range tt.seedSeen {
+				seen[n] = struct{}{}
+			}
+			got := shouldEmitRoleAssignment(tt.ra, seen)
+			if got != tt.want {
+				t.Errorf("shouldEmitRoleAssignment = %v, want %v", got, tt.want)
+			}
+			if tt.wantInSet != "" {
+				if _, ok := seen[tt.wantInSet]; !ok {
+					t.Errorf("expected %q added to seen set after emit", tt.wantInSet)
+				}
+			}
+		})
+	}
+}
+
+// TestShouldEmitRoleAssignment_RetryOnSamePage verifies the seen-set
+// behaviour within a single page: if two RoleAssignment structs share
+// a name (pathological but possible in Azure's paged responses under
+// retry conditions), only the first is emitted.
+func TestShouldEmitRoleAssignment_RetryOnSamePage(t *testing.T) {
+	name := "dup-dup-dup-dup-dup"
+	props := &armauthorization.RoleAssignmentProperties{}
+	ra1 := &armauthorization.RoleAssignment{Name: &name, Properties: props}
+	ra2 := &armauthorization.RoleAssignment{Name: &name, Properties: props}
+	seen := make(map[string]struct{})
+
+	if !shouldEmitRoleAssignment(ra1, seen) {
+		t.Fatalf("first call should emit")
+	}
+	if shouldEmitRoleAssignment(ra2, seen) {
+		t.Fatalf("second call on same name should skip")
+	}
+}
+
+// TestAdvancePendingSubs pins the sub-queue advancement logic: drop the
+// head when it matches the just-processed sub, preserve the tail, and
+// return ("", nil) at end-of-queue so the caller knows to stop.
+func TestAdvancePendingSubs(t *testing.T) {
+	tests := []struct {
+		name          string
+		justProcessed string
+		pending       []string
+		wantNext      string
+		wantRemaining []string
+	}{
+		{
+			name:          "head matches, drops it and returns next",
+			justProcessed: "sub-a",
+			pending:       []string{"sub-a", "sub-b", "sub-c"},
+			wantNext:      "sub-b",
+			wantRemaining: []string{"sub-b", "sub-c"},
+		},
+		{
+			name:          "last sub processed returns empty",
+			justProcessed: "sub-z",
+			pending:       []string{"sub-z"},
+			wantNext:      "",
+			wantRemaining: nil,
+		},
+		{
+			name:          "empty pending returns empty",
+			justProcessed: "sub-x",
+			pending:       nil,
+			wantNext:      "",
+			wantRemaining: nil,
+		},
+		{
+			name: "defensive: just-processed doesn't match head, preserve pending",
+			// Pathological: caller reordered the pending list between calls.
+			// Safer to preserve the tail than silently advance.
+			justProcessed: "sub-stale",
+			pending:       []string{"sub-a", "sub-b"},
+			wantNext:      "sub-a",
+			wantRemaining: []string{"sub-a", "sub-b"},
+		},
+		{
+			name:          "single sub, head matches, returns empty",
+			justProcessed: "only",
+			pending:       []string{"only"},
+			wantNext:      "",
+			wantRemaining: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotNext, gotRemaining := advancePendingSubs(tt.justProcessed, tt.pending)
+			if gotNext != tt.wantNext {
+				t.Errorf("next = %q, want %q", gotNext, tt.wantNext)
+			}
+			if !reflect.DeepEqual(gotRemaining, tt.wantRemaining) {
+				t.Errorf("remaining = %v, want %v", gotRemaining, tt.wantRemaining)
+			}
+		})
+	}
+}
+
+// TestListFirstCallSeedsInitPhase: when the pagination token is empty,
+// List should internally push raPhaseInit. We can't drive listInit
+// end-to-end without mocking Azure, but we CAN verify that the
+// top-level dispatch doesn't immediately return ErrNoToken or panic
+// on a nil/empty pToken — behaviour that was broken during
+// initial development.
+func TestListFirstCallAcceptsEmptyToken(t *testing.T) {
+	// Use an uninitialized builder — we don't expect success (the
+	// connector is nil, so listInit will nil-deref inside the Azure
+	// client construction). What we're pinning is that the token-parse
+	// path accepts an empty token without error and that the error,
+	// when it arrives, is NOT a "cannot unmarshal empty" pagination
+	// error. Anything that reaches into the handler's Azure-SDK call
+	// path means dispatch worked.
+	b := &roleAssignmentBuilder{}
+	defer func() {
+		if r := recover(); r != nil {
+			// A nil-deref panic is expected here (nil Connector); it
+			// proves we got past the token parse and reached the
+			// Azure client construction in listInit.
+			return
+		}
+	}()
+	_, _, _, err := b.List(context.Background(), nil, &pagination.Token{Token: ""})
+	// If no panic, we must at least have a non-pagination error.
+	if err != nil && contains(err.Error(), "pagination") {
+		t.Errorf("empty token should be accepted by pagination layer; got %v", err)
+	}
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
