@@ -17,7 +17,12 @@ import (
 	"go.uber.org/zap"
 )
 
-const roleAssignmentAssignedEntitlementSlug = "assigned"
+// roleAssignmentAssignedEntitlementSlug aliases the shared `typeAssigned`
+// constant (defined in group.go) so code in this file that reads like
+// "the slug of the assigned entitlement on a role_assignment binding" is
+// greppable by intent rather than by bare string. Same underlying value
+// ("assigned").
+const roleAssignmentAssignedEntitlementSlug = typeAssigned
 
 // roleAssignmentBuilder emits one resource per actual Azure role assignment
 // visible to the SP, carrying a ScopeBindingTrait annotation that pairs the
@@ -48,6 +53,9 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 
 	subsPager := b.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
 	for subsPager.More() {
+		if err := ctx.Err(); err != nil {
+			return nil, "", nil, err
+		}
 		subsPage, err := subsPager.NextPage(ctx)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing subscriptions: %w", err)
@@ -64,6 +72,9 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *p
 			}
 			raPager := raClient.NewListPager(nil)
 			for raPager.More() {
+				if err := ctx.Err(); err != nil {
+					return nil, "", nil, err
+				}
 				raPage, err := raPager.NextPage(ctx)
 				if err != nil {
 					return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments for sub %s: %w", subID, err)
@@ -122,6 +133,16 @@ func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resourc
 	}
 	principalResourceType := mapGraphPrincipalTypeToBaton(principalType)
 	if principalResourceType == "" {
+		// Principal type resolved from Graph, but the baton mapping doesn't
+		// know it (e.g. a directory-type this connector doesn't model yet).
+		// Log at Warn so dropped grants are visible — parallel to the
+		// getPrincipalType-failure Warn above.
+		ctxzap.Extract(ctx).Warn(
+			"baton-azure-infrastructure: unknown principal type from Graph; dropping grant for this binding",
+			zap.String("principal_type", principalType),
+			zap.String("principal_id", principalID),
+			zap.String("role_assignment_resource_id", resource.Id.Resource),
+		)
 		return nil, "", nil, nil
 	}
 	principalResourceID := &v2.ResourceId{
@@ -213,6 +234,13 @@ func parsePrincipalFromRoleAssignmentResourceID(id string) (string, bool) {
 // mapGraphPrincipalTypeToBaton translates the type strings returned by
 // getPrincipalType (which calls the Graph directoryObjects endpoint) into baton
 // resource type IDs. Kept in sync with getPrincipalIDResource in helper.go.
+//
+// The `"ServicePrincipal"` and `"Application"` strings in the SP case are the
+// ARM RoleAssignmentProperties.PrincipalType enum values, NOT Graph
+// @odata.type strings. getPrincipalType today only returns Graph shapes, so
+// those cases are defensive rather than exercised by the current caller —
+// included so the mapping stays correct if a future caller passes ARM-origin
+// principal type strings through.
 func mapGraphPrincipalTypeToBaton(graphType string) string {
 	switch graphType {
 	case "#microsoft.graph.user":
