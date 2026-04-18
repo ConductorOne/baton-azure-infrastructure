@@ -20,6 +20,10 @@ func (s *subscriptionBuilder) ResourceType(ctx context.Context) *v2.ResourceType
 
 func (s *subscriptionBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var rv []*v2.Resource
+	// Load tenant hierarchy once so each emitted subscription points at its
+	// containing mgmt group as its parentResourceId. Degrades to disconnected
+	// roots if the SP lacks mgmt-group-read.
+	idx := s.conn.hierarchy(ctx)
 	pager := s.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
@@ -28,7 +32,7 @@ func (s *subscriptionBuilder) List(ctx context.Context, parentResourceID *v2.Res
 		}
 
 		for _, subscription := range page.Value {
-			sr, err := subscriptionResource(ctx, subscription)
+			sr, err := subscriptionResource(ctx, subscription, idx)
 			if err != nil {
 				return nil, "", nil, err
 			}

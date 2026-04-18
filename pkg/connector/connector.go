@@ -14,6 +14,8 @@ import (
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
+	"sync"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
@@ -34,6 +36,14 @@ type Connector struct {
 	enableSyncExternalResourcesViaBatonID bool
 	skipEntraIDP2LicenseFeatures          bool
 	syncRoleAssignments                   bool
+
+	// hierarchyOnce + hierarchyCache memoize one call to
+	// armmanagementgroups.EntitiesClient per sync. Builders that need to
+	// set parentResourceId on scope resources (managementGroupBuilder,
+	// subscriptionBuilder) consult this via (*Connector).hierarchy(ctx).
+	// See hierarchy.go for the construction + degrade-gracefully logic.
+	hierarchyOnce  sync.Once
+	hierarchyCache hierarchyIndex
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.

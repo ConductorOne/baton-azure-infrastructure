@@ -293,7 +293,13 @@ func getGroupGrantURL(principal *v2.Resource) string {
 }
 
 // https://learn.microsoft.com/es-es/rest/api/subscription/subscriptions/list?view=rest-subscription-2021-10-01&tabs=HTTP
-func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) (*v2.Resource, error) {
+//
+// idx is the optional tenant-hierarchy lookup (from (*Connector).hierarchy).
+// When present, supplies the parentResourceId — the containing management
+// group — so the sparse-ACL tree view renders tenant → mgmt-group → sub as
+// one coherent tree rather than disconnected roots. When empty, the sub is
+// emitted without a parent.
+func subscriptionResource(ctx context.Context, s *armsubscription.Subscription, idx hierarchyIndex) (*v2.Resource, error) {
 	var appTraitOpts []rs.AppTraitOption
 	profile := map[string]interface{}{
 		"subscriptionId": StringValue(s.SubscriptionID),
@@ -302,11 +308,8 @@ func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) 
 	}
 
 	appTraitOpts = append(appTraitOpts, rs.WithAppProfile(profile))
-	return rs.NewAppResource(
-		StringValue(s.DisplayName),
-		subscriptionsResourceType,
-		StringValue(s.SubscriptionID),
-		appTraitOpts,
+
+	opts := []rs.ResourceOption{
 		rs.WithAnnotation(&v2.V1Identifier{
 			Id: StringValue(s.SubscriptionID),
 		}),
@@ -314,7 +317,19 @@ func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) 
 			&v2.ChildResourceType{ResourceTypeId: resourceGroupResourceType.Id},
 			&v2.ChildResourceType{ResourceTypeId: roleResourceType.Id},
 			&v2.ChildResourceType{ResourceTypeId: storageAccountResourceType.Id},
-		))
+		),
+	}
+	if parent := idx[StringValue(s.SubscriptionID)]; parent != nil {
+		opts = append(opts, rs.WithParentResourceID(parent))
+	}
+
+	return rs.NewAppResource(
+		StringValue(s.DisplayName),
+		subscriptionsResourceType,
+		StringValue(s.SubscriptionID),
+		appTraitOpts,
+		opts...,
+	)
 }
 
 // https://learn.microsoft.com/es-es/rest/api/subscription/tenants/list?view=rest-subscription-2021-10-01&tabs=HTTP

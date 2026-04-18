@@ -47,9 +47,16 @@ func (b *managementGroupBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *
 		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing management groups: %w", err)
 	}
 
+	// One-shot tenant-hierarchy load so managementGroupResource can set
+	// parentResourceId correctly for nested mgmt groups (and tenant-root mgmt
+	// groups point at the tenant resource). If this call 403s, the index is
+	// empty and parents are simply omitted — prior disconnected-roots
+	// behavior preserved as degradation.
+	idx := b.conn.hierarchy(ctx)
+
 	rv := make([]*v2.Resource, 0, len(mgs))
 	for _, mg := range mgs {
-		resource, err := managementGroupResource(mg)
+		resource, err := managementGroupResource(mg, idx)
 		if err != nil {
 			return nil, "", nil, err
 		}
@@ -71,7 +78,14 @@ func (b *managementGroupBuilder) Grants(_ context.Context, _ *v2.Resource, _ *pa
 // managementGroupResource builds a baton resource for an Azure management group.
 // The baton resource ID is the ARM scope path so ScopeBindingTrait.scopeResourceId
 // references (which carry the ARM path verbatim) resolve correctly.
-func managementGroupResource(mg *armmanagementgroups.ManagementGroupInfo) (*v2.Resource, error) {
+//
+// idx is the optional tenant-hierarchy lookup (from (*Connector).hierarchy).
+// When present, it supplies the parentResourceId — nested mgmt groups point
+// at their parent mgmt group, the tenant root mgmt group points at the
+// tenant resource. When empty (SP lacks mgmt-group-read or caller didn't
+// load it), parentResourceId is left unset and the resource renders as a
+// root in the tree.
+func managementGroupResource(mg *armmanagementgroups.ManagementGroupInfo, idx hierarchyIndex) (*v2.Resource, error) {
 	if mg == nil || mg.ID == nil || mg.Name == nil {
 		return nil, nil
 	}
@@ -83,10 +97,16 @@ func managementGroupResource(mg *armmanagementgroups.ManagementGroupInfo) (*v2.R
 		displayName = *mg.Properties.DisplayName
 	}
 
+	var opts []rs.ResourceOption
+	if parent := idx[StringValue(mg.ID)]; parent != nil {
+		opts = append(opts, rs.WithParentResourceID(parent))
+	}
+
 	return rs.NewResource(
 		displayName,
 		managementGroupResourceType,
 		StringValue(mg.ID),
+		opts...,
 	)
 }
 
