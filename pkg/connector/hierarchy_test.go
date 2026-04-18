@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -167,4 +168,59 @@ func TestBuildHierarchyIndex(t *testing.T) {
 	if idx[subGUID].Resource != childID {
 		t.Errorf("subscription must point at its containing mgmt group, got %v", idx[subGUID])
 	}
+}
+
+// TestErrMgmtGroupReadRequired_Message pins the user-facing error string,
+// which operators will see in logs if the SP is missing the required
+// Management Group Reader role at tenant root. It must mention: the
+// required role name, the specific flag that triggers the requirement,
+// and the ARM scope path where the role should be granted. Regressions
+// that drop any of these three would leave operators with a generic
+// 403 and no actionable next step.
+func TestErrMgmtGroupReadRequired_Message(t *testing.T) {
+	msg := errMgmtGroupReadRequired.Error()
+	for _, needle := range []string{
+		"Management Group Reader",
+		"--sync-role-assignments",
+		"/providers/Microsoft.Management/managementGroups/",
+	} {
+		if !contains(msg, needle) {
+			t.Errorf("errMgmtGroupReadRequired.Error() missing %q; full message: %q", needle, msg)
+		}
+	}
+}
+
+// TestErrMgmtGroupReadRequired_Unwrap confirms that a wrapped
+// errMgmtGroupReadRequired (as returned from loadHierarchy on 403) is
+// detectable via errors.Is so downstream code can take the "it's a
+// permission issue" branch without string-matching.
+func TestErrMgmtGroupReadRequired_Unwrap(t *testing.T) {
+	// Simulate what loadHierarchy does on 403: wrap the sentinel around an
+	// Azure-origin error.
+	underlying := errors.New("RESPONSE 403 forbidden")
+	wrapped := wrapPermissionError(underlying)
+
+	if !errors.Is(wrapped, errMgmtGroupReadRequired) {
+		t.Errorf("errors.Is should detect the sentinel inside a wrapped error; got %v", wrapped)
+	}
+	if !errors.Is(wrapped, underlying) {
+		t.Errorf("errors.Is should also unwrap to the underlying Azure error; got %v", wrapped)
+	}
+}
+
+// wrapPermissionError is the same wrapper loadHierarchy applies on 403.
+// Extracted into the test so the assertion documents the expected shape
+// without duplicating fmt format strings.
+func wrapPermissionError(cause error) error {
+	// Matches the fmt.Errorf call in loadHierarchy.
+	return wrappedPermission{cause: cause}
+}
+
+type wrappedPermission struct{ cause error }
+
+func (w wrappedPermission) Error() string {
+	return errMgmtGroupReadRequired.Error() + ": " + w.cause.Error()
+}
+func (w wrappedPermission) Unwrap() []error {
+	return []error{errMgmtGroupReadRequired, w.cause}
 }

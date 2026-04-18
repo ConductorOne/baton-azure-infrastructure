@@ -88,10 +88,15 @@ baton resources
 We also introduced resource_group_role_assignment(resource group ID, subscription ID and role ID) for provisioning
 resource Groups.
 
-### Optional permissions
+### Additional permissions for `--sync-role-assignments`
 
-- To sync management-group-scoped role assignments, the application must have **Management Group Reader** at the relevant management-group scope (or higher).
-- To provision `role_assignment` resources, the application must have write on `Microsoft.Authorization/roleAssignments` at the target scope — the built-in **User Access Administrator** role is sufficient.
+When `--sync-role-assignments` is enabled the following are **required**, not optional — the connector fails fast at startup if the application lacks them:
+
+- **Management Group Reader** at the tenant root management group (`/providers/Microsoft.Management/managementGroups/{tenantId}`). Required to enumerate the mgmt-group → subscription hierarchy that the sparse-ACL tree-view UX walks; without it the connector exits with an actionable error pointing at the specific role + scope to grant.
+
+Additionally for provisioning:
+
+- To provision `role_assignment` resources via Grant/Revoke, the application must have write on `Microsoft.Authorization/roleAssignments` at the target scope — the built-in **User Access Administrator** role is sufficient.
 
 ## resource_group_role_assignment usage:
 

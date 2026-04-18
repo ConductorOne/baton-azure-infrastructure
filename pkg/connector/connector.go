@@ -156,6 +156,18 @@ func NewConnectorFromToken(
 		syncRoleAssignments:                   syncRoleAssignments,
 	}
 
+	// When --sync-role-assignments is on, Management Group Reader is a hard
+	// prerequisite: without it we can't build the tenant→mgmt-group→sub
+	// hierarchy that the sparse-ACL tree-view UX walks, and we'd emit
+	// disconnected scope roots that render poorly in c1. Fail fast at
+	// init with an actionable error rather than letting the operator
+	// discover the regression mid-sync.
+	if syncRoleAssignments {
+		if err := c.ensureHierarchy(ctx); err != nil {
+			return nil, err
+		}
+	}
+
 	return c, nil
 }
 

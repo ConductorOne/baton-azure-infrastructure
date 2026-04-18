@@ -142,7 +142,7 @@ A user with at least the **Cloud Application Administrator** permission in Azure
 
 - To sync subscription resources: The application must be granted at least **Reader** permissions on the subscription.
 - To provision subscription roles: The **Owner** role is required to provision access to other roles in the subscription.
-- To sync management-group-scoped assignments: The application must be granted **Management Group Reader** at the relevant management group scope (or higher).
+- **When "Sync role assignments" is enabled (`--sync-role-assignments=true` / `BATON_SYNC_ROLE_ASSIGNMENTS=true`): Management Group Reader is required at the tenant root management group** (`/providers/Microsoft.Management/managementGroups/{tenantId}`). The connector fails fast at startup if the application lacks this role, with an error pointing at the exact scope to grant. This permission is needed to build the mgmt-group → subscription hierarchy that the sparse-ACL tree-view UX walks.
 - To provision role assignments (`role_assignment` resource type): The application must have write access on `Microsoft.Authorization/roleAssignments` at the target scope — the built-in **User Access Administrator** role grants this, or a custom role including the `Microsoft.Authorization/roleAssignments/write` and `.../delete` actions.
 </Warning>
 

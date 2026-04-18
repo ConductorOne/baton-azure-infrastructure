@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -40,31 +41,64 @@ const (
 // reference.
 type hierarchyIndex map[string]*v2.ResourceId
 
-// hierarchy lazily fetches the tenant's management-group + subscription
-// hierarchy via armmanagementgroups.NewEntitiesClient so every builder that
-// needs to set parentResourceId (managementGroupBuilder, subscriptionBuilder)
-// can consult a single shared index. Memoized on the Connector via
-// hierarchyOnce — one roundtrip per sync, amortized across all scope
-// builders.
+// errMgmtGroupReadRequired is returned when the SP lacks Management Group
+// Reader (403 from the entities API). Surfaced to the operator as a
+// fatal error during connector init when --sync-role-assignments=true,
+// and silently logged as a degradation otherwise.
+var errMgmtGroupReadRequired = fmt.Errorf(
+	"baton-azure-infrastructure: --sync-role-assignments requires the " +
+		"service principal to have 'Management Group Reader' (or equivalent) " +
+		"at the tenant root management group. Grant this role at " +
+		"/providers/Microsoft.Management/managementGroups/{tenantId} and retry")
+
+// ensureHierarchy eagerly loads the tenant hierarchy and propagates any
+// permission or API error. Used during connector init when
+// --sync-role-assignments=true so the operator sees an actionable error
+// at startup rather than a silent tree-view regression at sync time.
 //
-// Degrades gracefully: if the caller lacks mgmt-group-read permission (403),
-// returns an empty map. Parentless resources then render as disconnected
-// roots in the tree view, matching pre-hierarchy behavior.
+// Shares the sync.Once with hierarchy(): whichever fires first populates
+// the cache; the other becomes a no-op. Caller should invoke at most
+// one of these per Connector lifetime.
+func (c *Connector) ensureHierarchy(ctx context.Context) error {
+	var loadErr error
+	c.hierarchyOnce.Do(func() {
+		idx, err := loadHierarchy(ctx, c.token, c.client.ArmOptions())
+		c.hierarchyCache = idx
+		loadErr = err
+	})
+	return loadErr
+}
+
+// hierarchy returns the memoized tenant hierarchy, loading on first call
+// if not yet populated. Errors are swallowed: this is the graceful-
+// degrade path used by callers for which mgmt-group-read is a nice-to-
+// have rather than a hard requirement (e.g. subscriptionBuilder when
+// --sync-role-assignments is off).
+//
+// When --sync-role-assignments=true the connector init path calls
+// ensureHierarchy first; this method then returns the cached result.
 func (c *Connector) hierarchy(ctx context.Context) hierarchyIndex {
 	c.hierarchyOnce.Do(func() {
-		c.hierarchyCache = loadHierarchy(ctx, c.token, c.client.ArmOptions())
+		idx, err := loadHierarchy(ctx, c.token, c.client.ArmOptions())
+		if err != nil {
+			ctxzap.Extract(ctx).Warn(
+				"baton-azure-infrastructure: hierarchy load failed; scope parents will be unset",
+				zap.Error(err))
+		}
+		c.hierarchyCache = idx
 	})
 	return c.hierarchyCache
 }
 
-// loadHierarchy is the live path: fetch entities, hand off to the pure
-// transformer.
-func loadHierarchy(ctx context.Context, token azcore.TokenCredential, armOpts *arm.ClientOptions) hierarchyIndex {
-	l := ctxzap.Extract(ctx)
+// loadHierarchy fetches the entities list + returns the keyed parent
+// index. Errors are returned, not swallowed — caller decides whether
+// to treat them as fatal. A 403 from the entities API is translated to
+// errMgmtGroupReadRequired so the fatal path can give the operator a
+// pointer to the actual permission needed.
+func loadHierarchy(ctx context.Context, token azcore.TokenCredential, armOpts *arm.ClientOptions) (hierarchyIndex, error) {
 	client, err := armmanagementgroups.NewEntitiesClient(token, armOpts)
 	if err != nil {
-		l.Warn("baton-azure-infrastructure: cannot construct entities client; parent hierarchy will be unset", zap.Error(err))
-		return hierarchyIndex{}
+		return hierarchyIndex{}, fmt.Errorf("baton-azure-infrastructure: constructing entities client: %w", err)
 	}
 
 	var entities []*armmanagementgroups.EntityInfo
@@ -73,18 +107,16 @@ func loadHierarchy(ctx context.Context, token azcore.TokenCredential, armOpts *a
 		page, pagerErr := pager.NextPage(ctx)
 		if pagerErr != nil {
 			if isForbidden(pagerErr) {
-				l.Warn("baton-azure-infrastructure: caller lacks access to management-group entities; scope hierarchy will be unset (roots will render disconnected)",
-					zap.Error(pagerErr))
-				return hierarchyIndex{}
+				// Wrap both so callers using errors.Is / errors.As can match
+				// either the sentinel (for user-facing messaging) or the
+				// underlying Azure response error.
+				return hierarchyIndex{}, fmt.Errorf("%w: %w", errMgmtGroupReadRequired, pagerErr)
 			}
-			l.Warn("baton-azure-infrastructure: entities walk failed; scope hierarchy partial",
-				zap.Error(pagerErr),
-				zap.Int("entities_collected_so_far", len(entities)))
-			break
+			return hierarchyIndex{}, fmt.Errorf("baton-azure-infrastructure: listing management-group entities: %w", pagerErr)
 		}
 		entities = append(entities, page.Value...)
 	}
-	return buildHierarchyIndex(entities)
+	return buildHierarchyIndex(entities), nil
 }
 
 // buildHierarchyIndex is the pure part of hierarchy construction: takes a

@@ -7,6 +7,14 @@ description: How to emit TRAIT_SCOPE_BINDING + ScopeBindingTrait from this conne
 
 Use this skill when touching anything related to `role_assignment`, `ScopeBindingTrait`, or sparse-ACL classification. Wrong emission → app classified CLASSIC silently, no error, no lint failure.
 
+## Hard permission requirement when flag is on
+
+`--sync-role-assignments=true` makes **Management Group Reader** at tenant root (`/providers/Microsoft.Management/managementGroups/{tenantId}`) a hard requirement. The connector calls `ensureHierarchy` at `NewConnectorFromToken` time and fails fast with `errMgmtGroupReadRequired` if the entities API returns 403.
+
+Rationale: without the mgmt-group → sub hierarchy, the sparse-ACL tree-view UX (c1 `C1ResourceViewerTree`) renders scopes as disconnected roots — a UX regression. Fail-fast gives the operator an actionable error at init rather than a silent broken tree at render time.
+
+When the flag is off, the graceful-degrade path is preserved (hierarchy call swallowed on 403). Subscription builders may still benefit from parent wiring when permission is present.
+
 ## The 3-point emission contract
 
 For the c1 uplift (proposed PR ductone/c1#16540) to classify this app as `SPARSE` or `HYBRID`, the connector must:
