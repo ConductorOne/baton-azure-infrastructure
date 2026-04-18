@@ -21,6 +21,12 @@ sidebarTitle: "Microsoft Azure Infrastructure"
 | Resource group roles | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |  |
 | Storage accounts | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |  |
 | Containers | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |  |
+| Management groups | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |  |
+| Role assignments | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |
+
+<Note>
+**Role assignments** sync is gated behind the **Sync role assignments** toggle (cloud-hosted) or `BATON_SYNC_ROLE_ASSIGNMENTS` (self-hosted). It is **off by default**. When enabled, the connector emits each Azure RBAC role assignment as a scope-binding resource (with `TRAIT_SCOPE_BINDING`), which unlocks sparse-ACL / hybrid classification in the C1 uplift flow.
+</Note>
 
 The Microsoft Azure Infrastructure connector works optimally when connected to a tenant licensed with either Microsoft Entra ID P2 or Microsoft Entra ID Governance. Other license types are supported, but the connector is not able to provide the same level of detail in all synced information. See the instructions below about using the **Skip Entra ID P2 License Features** configuration option if you do not have one of these license types.
 
@@ -136,6 +142,8 @@ A user with at least the **Cloud Application Administrator** permission in Azure
 
 - To sync subscription resources: The application must be granted at least **Reader** permissions on the subscription.
 - To provision subscription roles: The **Owner** role is required to provision access to other roles in the subscription.
+- To sync management-group-scoped assignments: The application must be granted **Management Group Reader** at the relevant management group scope (or higher).
+- To provision role assignments (`role_assignment` resource type): The application must have write access on `Microsoft.Authorization/roleAssignments` at the target scope — the built-in **User Access Administrator** role grants this, or a custom role including the `Microsoft.Authorization/roleAssignments/write` and `.../delete` actions.
 </Warning>
 
 **That's it!** Next, move on to the connector configuration instructions.
@@ -203,6 +211,9 @@ To complete this task, you'll need:
   </Step>
   <Step>
   **Optional.** Check the box if you want to **Enable syncing external resources** (identities from a shared identity source).
+  </Step>
+  <Step>
+  **Optional.** Check the box if you want to **Sync role assignments**. When enabled, each Azure RBAC role assignment is emitted as a scope-binding resource (`TRAIT_SCOPE_BINDING`), enabling sparse-ACL / hybrid app classification in C1. This is **off by default** because scope-binding emission significantly increases sync volume. Requires at least **Reader** on the targeted subscription(s) and/or **Management Group Reader** at the relevant management-group scope for full coverage; provisioning of role assignments additionally requires write access on `Microsoft.Authorization/roleAssignments` (e.g. **User Access Administrator**) at the target scope.
   </Step>
   <Step>
   If you are **NOT** running Azure infrastructure on an **Entra ID P2** or **Entra ID Governance** license, click to enable **Skip Entra ID P2 License Features**. If this option is not checked and you do not have one of the license types above, the connector will fail to sync properly.
@@ -308,6 +319,12 @@ stringData:
   # Optional: include if you want to pull identities from a shared identity source
   BATON_ENABLE_SYNC_EXTERNAL_RESOURCES_VIA_BATON_ID: true
   BATON_FILE: <The path to the c1z file that contains identities to sync>
+
+  # Optional: include if you want to sync Azure role assignments as scope-binding
+  # resources (emits TRAIT_SCOPE_BINDING, enabling sparse-ACL / hybrid classification
+  # in C1 uplift). Off by default. For provisioning, the SP also needs write on
+  # Microsoft.Authorization/roleAssignments at the target scope.
+  BATON_SYNC_ROLE_ASSIGNMENTS: true
 
   # Include if you're using a license other than 'Microsoft Entra ID P2' or 'Microsoft Entra ID Governance'
   BATON_SKIP_ENTRA_ID_P2_LICENSE_FEATURES: true
