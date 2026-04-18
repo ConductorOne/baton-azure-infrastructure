@@ -516,6 +516,14 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 				if servicePrincipalType, ok := principalData["servicePrincipalType"].(string); ok {
 					return servicePrincipalType, nil
 				}
+				// Defensive fallback when Graph returns a servicePrincipal
+				// object without the servicePrincipalType field. Default to
+				// Application so mapGraphPrincipalTypeToBaton routes it to
+				// enterprise_application rather than dropping the grant.
+				// The caller's negative cache (role_assignment.go) would
+				// otherwise permanently skip this principal for the rest of
+				// the sync — silent data loss.
+				return spTypeApplication, nil
 			default:
 				return principalType, nil
 			}

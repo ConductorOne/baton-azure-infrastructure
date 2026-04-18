@@ -2,13 +2,10 @@ package connector
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -103,13 +100,6 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *
 	}
 	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeAssigned, options...))
 
-	options = []ent.EntitlementOption{
-		ent.WithDisplayName(fmt.Sprintf("%s Role Member", resource.DisplayName)),
-		ent.WithDescription(fmt.Sprintf("Member of %s role", resource.DisplayName)),
-		ent.WithGrantableTo(userResourceType, groupResourceType),
-	}
-	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeAssigned, options...))
-
 	return rv, "", nil, nil
 }
 
@@ -188,41 +178,40 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	roleDefinitionID := subscriptionRoleId(subscriptionId, roleId)
 	// Create a role assignment name (must be unique)
 	roleAssignmentId := uuid.New().String()
-	// Prepare role assignment parameters
+	// Prepare role assignment parameters. PrincipalType is User because the
+	// early guard above restricts this Grant path to userResourceType only.
+	// armauthorization v2+ accepts PrincipalType on Create and uses it to
+	// skip Azure's server-side Graph lookup — both a perf win and a
+	// compatibility fix for SPs without Graph read permission.
+	ptUser := armauthorization.PrincipalTypeUser
 	parameters := armauthorization.RoleAssignmentCreateParameters{
 		Properties: &armauthorization.RoleAssignmentProperties{
 			PrincipalID:      &principalID,
 			RoleDefinitionID: &roleDefinitionID,
+			PrincipalType:    &ptUser,
 		},
 	}
 
-	// Create the role assignment
+	// Create the role assignment. 409 Conflict is non-fatal idempotency:
+	// the assignment already exists with these parameters. Return the
+	// GrantAlreadyExists annotation so c1 can distinguish from a fresh
+	// grant.
 	resp, err := roleAssignmentsClient.Create(ctx, scope, roleAssignmentId, parameters, nil)
 	if err != nil {
-		var azureErr *azcore.ResponseError
-		switch {
-		case errors.As(err, &azureErr):
-			if azureErr.StatusCode == http.StatusConflict {
-				l.Warn(
-					"azure-infrastructure-connector: failed to perform request",
-					zap.Int("StatusCode", azureErr.StatusCode),
-					zap.String("ErrorCode", azureErr.ErrorCode),
-					zap.String("ErrorMsg", azureErr.Error()),
-				)
-			}
-		default:
-			return nil, err
+		if isConflict(err) {
+			return annotations.New(&v2.GrantAlreadyExists{}), nil
 		}
+		return nil, fmt.Errorf("azure-infrastructure-connector: create role assignment (scope=%s role=%s principal=%s): %w",
+			scope, roleDefinitionID, principalID, err)
 	}
 
 	if resp.ID != nil {
-		l.Warn("Role membership has been created.",
-			zap.String("ID", *resp.ID),
-			zap.String("Type", *resp.Type),
-			zap.String("Name", *resp.Name),
-			zap.String("PrincipalID", *resp.Properties.PrincipalID),
-			zap.String("RoleDefinitionID", *resp.Properties.RoleDefinitionID),
-			zap.String("RoleDefinitionID", *resp.Properties.Scope),
+		l.Info("azure-infrastructure-connector: role membership created",
+			zap.String("id", *resp.ID),
+			zap.String("name", *resp.Name),
+			zap.String("principal_id", *resp.Properties.PrincipalID),
+			zap.String("role_definition_id", *resp.Properties.RoleDefinitionID),
+			zap.String("scope", *resp.Properties.Scope),
 		)
 	}
 
