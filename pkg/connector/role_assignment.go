@@ -228,7 +228,7 @@ func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag
 	var emitted []*v2.Resource
 	var seenNames []string
 	if firstSubID != "" {
-		mgs, err := listManagementGroups(ctx, b.conn.token, b.conn.client.ArmOptions())
+		mgs, err := b.conn.managementGroups(ctx)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing management groups: %w", err)
 		}

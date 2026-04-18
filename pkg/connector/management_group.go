@@ -42,7 +42,7 @@ func (b *managementGroupBuilder) ResourceType(_ context.Context) *v2.ResourceTyp
 }
 
 func (b *managementGroupBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	mgs, err := listManagementGroups(ctx, b.conn.token, b.conn.client.ArmOptions())
+	mgs, err := b.conn.managementGroups(ctx)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing management groups: %w", err)
 	}
@@ -110,11 +110,26 @@ func managementGroupResource(mg *armmanagementgroups.ManagementGroupInfo, idx hi
 	)
 }
 
+// managementGroups returns the memoized list of management groups visible
+// to the caller. Both managementGroupBuilder.List and
+// roleAssignmentBuilder.listInit need this; without memoization each sync
+// does the full pager walk twice. The cache lives for the connector's
+// lifetime (one sync).
+func (c *Connector) managementGroups(ctx context.Context) ([]*armmanagementgroups.ManagementGroupInfo, error) {
+	c.mgmtGroupsOnce.Do(func() {
+		c.mgmtGroupsCache, c.mgmtGroupsErr = listManagementGroups(ctx, c.token, c.client.ArmOptions())
+	})
+	return c.mgmtGroupsCache, c.mgmtGroupsErr
+}
+
 // listManagementGroups enumerates every management group the caller can see.
 // Returns an empty slice + nil error if the caller lacks tenant-root access
 // (403) — mirrors role_assignments.go:213's degrade-gracefully pattern for the
 // analogous tenant-root 403 during role assignment enumeration. Any other
 // error is propagated.
+//
+// Callers should usually go through (*Connector).managementGroups instead
+// to amortize the pager walk across multiple builders.
 func listManagementGroups(ctx context.Context, token azcore.TokenCredential, armOpts *arm.ClientOptions) ([]*armmanagementgroups.ManagementGroupInfo, error) {
 	client, err := armmanagementgroups.NewClient(token, armOpts)
 	if err != nil {

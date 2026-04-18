@@ -19,6 +19,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 )
@@ -44,6 +45,16 @@ type Connector struct {
 	// See hierarchy.go for the construction + degrade-gracefully logic.
 	hierarchyOnce  sync.Once
 	hierarchyCache hierarchyIndex
+
+	// mgmtGroupsOnce + mgmtGroupsCache + mgmtGroupsErr memoize one call
+	// to armmanagementgroups.NewClient().NewListPager() per sync. Both
+	// managementGroupBuilder.List and roleAssignmentBuilder.listInit
+	// need the raw management-group list; without this memo each sync
+	// does the full pager walk twice. See (*Connector).managementGroups
+	// in management_group.go for the construction.
+	mgmtGroupsOnce  sync.Once
+	mgmtGroupsCache []*armmanagementgroups.ManagementGroupInfo
+	mgmtGroupsErr   error
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
