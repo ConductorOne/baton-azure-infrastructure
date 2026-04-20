@@ -55,18 +55,28 @@ var (
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP},
 	}
 
+	// OptInRequired: advertises to c1 that this resource type should render as
+	// an unchecked checkbox in the connector configuration UI. Operators pick
+	// opt-in per tenant; c1 then sets SyncFull.SyncResourceTypeIds to include
+	// this type, and the SDK dispatches the builder. For standalone / local
+	// runs, use --sync-resource-types=role_assignment,... (baton-sdk built-in).
+	// See baton-crowdstrike#54 for the reference pattern.
 	roleAssignmentResourceType = &v2.ResourceType{
 		Id:          "role_assignment",
 		DisplayName: "Role Assignment",
 		Description: "An Azure role assignment — a principal holding a role at a specific scope (subscription, resource group, or resource).",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_SCOPE_BINDING},
+		Annotations: annotations.New(&v2.OptInRequired{}),
 	}
 
+	// Management groups exist as a scope parent for role_assignment bindings.
+	// They carry the same OptInRequired signal as role_assignment — emitting one
+	// without the other produces dangling parent references in the c1z.
 	managementGroupResourceType = &v2.ResourceType{
 		Id:          "management_group",
 		DisplayName: "Management Group",
 		Description: "An Azure management group — a hierarchical container for subscriptions. Acts as a scope carrier for role assignments; no entitlements of its own.",
-		Annotations: annotations.New(&v2.SkipEntitlementsAndGrants{}),
+		Annotations: annotations.New(&v2.SkipEntitlementsAndGrants{}, &v2.OptInRequired{}),
 	}
 
 	roleResourceType = &v2.ResourceType{

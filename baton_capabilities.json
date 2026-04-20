@@ -63,6 +63,26 @@
     },
     {
       "resourceType": {
+        "id": "management_group",
+        "displayName": "Management Group",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlementsAndGrants"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ],
+        "description": "An Azure management group — a hierarchical container for subscriptions. Acts as a scope carrier for role assignments; no entitlements of its own."
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
+    },
+    {
+      "resourceType": {
         "id": "resource_group",
         "displayName": "Resource Group of Azure Infrastructure",
         "traits": [
@@ -88,6 +108,27 @@
         "CAPABILITY_PROVISION"
       ],
       "permissions": {}
+    },
+    {
+      "resourceType": {
+        "id": "role_assignment",
+        "displayName": "Role Assignment",
+        "traits": [
+          "TRAIT_SCOPE_BINDING"
+        ],
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ],
+        "description": "An Azure role assignment — a principal holding a role at a specific scope (subscription, resource group, or resource)."
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC",
+        "CAPABILITY_PROVISION"
+      ],
+      "permissions": {},
+      "optInRequired": true
     },
     {
       "resourceType": {
