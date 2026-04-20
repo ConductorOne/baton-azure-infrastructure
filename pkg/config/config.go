@@ -57,6 +57,18 @@ var Config = field.NewConfiguration(
 			field.WithDescription("If true, skips the features that require a 'Microsoft Entra ID P2' or 'Microsoft Entra ID Governance' license on the tenant."),
 			field.WithDefaultValue(false),
 		),
+		// INVESTIGATION FLAG - do not merge. Hidden from c1 UI + --help; settable
+		// via BATON_DEDUP_CLASSIC_RBAC_EMISSIONS=true for local comparison runs.
+		// When enabled, role.Grants returns nil, dropping the classic per-(role,
+		// principal) fan-out that duplicates the sparse role_assignment binding.
+		// Other builders (subscription already nil, storage_account complex PIM
+		// mixing) not gated by this prototype.
+		field.BoolField(
+			"dedup-classic-rbac-emissions",
+			field.WithDescription("INVESTIGATION ONLY. Suppress classic role-builder Grants fan-out (duplicates sparse role_assignment when opted in). Hidden env var; do not ship."),
+			field.WithDefaultValue(false),
+			field.WithHidden(true),
+		),
 	},
 	field.WithConstraints(
 		field.FieldsMutuallyExclusive(

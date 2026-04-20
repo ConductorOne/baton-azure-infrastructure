@@ -104,6 +104,12 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *
 }
 
 func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+	// INVESTIGATION ONLY gate - BATON_DEDUP_CLASSIC_RBAC_EMISSIONS=true skips this
+	// builder's per-(role, principal) fan-out because it duplicates the sparse
+	// role_assignment binding when opted in. See config.go dedup-classic-rbac-emissions.
+	if r.conn.dedupClassicRbacEmissions {
+		return nil, "", nil, nil
+	}
 	var (
 		subscriptionID, roleID string
 		rv                     []*v2.Grant

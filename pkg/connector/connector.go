@@ -36,6 +36,11 @@ type Connector struct {
 	skipStorageContainerSync     bool
 	skipEntraIDP2LicenseFeatures bool
 
+	// INVESTIGATION ONLY - do not ship. Gates role.Grants to return nil
+	// (drops classic per-(role, principal) fan-out that duplicates the
+	// sparse role_assignment binding). Hidden env var BATON_DEDUP_CLASSIC_RBAC_EMISSIONS.
+	dedupClassicRbacEmissions bool
+
 	// hierarchyOnce + hierarchyCache memoize one call to
 	// armmanagementgroups.EntitiesClient per sync. Builders that need to
 	// set parentResourceId on scope resources (managementGroupBuilder,
@@ -117,6 +122,7 @@ func NewConnectorFromToken(
 	skipUnusedRoles bool,
 	skipStorageContainerSync bool,
 	skipEntraIDP2LicenseFeatures bool,
+	dedupClassicRbacEmissions bool,
 ) (*Connector, error) {
 	azureClient, err := client.NewAzureClient(ctx, httpClient, token, skipAdGroups, graphDomain)
 	if err != nil {
@@ -157,6 +163,7 @@ func NewConnectorFromToken(
 		skipStorageContainerSync:     skipStorageContainerSync,
 		roleDefinitionsClient:        roleDefinitionsClient,
 		skipEntraIDP2LicenseFeatures: skipEntraIDP2LicenseFeatures,
+		dedupClassicRbacEmissions:    dedupClassicRbacEmissions,
 	}, nil
 }
 
@@ -173,6 +180,7 @@ func New(
 	skipUnusedRoles bool,
 	skipStorageContainerSync bool,
 	skipEntraIDP2LicenseFeatures bool,
+	dedupClassicRbacEmissions bool,
 ) (*Connector, error) {
 	var cred azcore.TokenCredential
 	httpClient, err := uhttp.NewClient(
@@ -219,5 +227,6 @@ func New(
 		skipUnusedRoles,
 		skipStorageContainerSync,
 		skipEntraIDP2LicenseFeatures,
+		dedupClassicRbacEmissions,
 	)
 }

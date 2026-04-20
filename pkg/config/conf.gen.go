@@ -14,6 +14,7 @@ type AzureInfrastructure struct {
 	SkipUnusedRoles              bool   `mapstructure:"skip-unused-roles"`
 	SkipSyncStorageContainers    bool   `mapstructure:"skip-sync-storage-containers"`
 	SkipEntraIdP2LicenseFeatures bool   `mapstructure:"skip-entra-id-p2-license-features"`
+	DedupClassicRbacEmissions    bool   `mapstructure:"dedup-classic-rbac-emissions"`
 }
 
 func (c *AzureInfrastructure) findFieldByTag(tagValue string) (any, bool) {
