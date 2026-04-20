@@ -4,18 +4,16 @@ package config
 import "reflect"
 
 type AzureInfrastructure struct {
-	UseCliCredentials                     bool   `mapstructure:"use-cli-credentials"`
-	AzureClientSecret                     string `mapstructure:"azure-client-secret"`
-	AzureTenantId                         string `mapstructure:"azure-tenant-id"`
-	AzureClientId                         string `mapstructure:"azure-client-id"`
-	Mailboxsettings                       bool   `mapstructure:"mailboxSettings"`
-	SkipAdGroups                          bool   `mapstructure:"skip-ad-groups"`
-	GraphDomain                           string `mapstructure:"graph-domain"`
-	SkipUnusedRoles                       bool   `mapstructure:"skip-unused-roles"`
-	SkipSyncStorageContainers             bool   `mapstructure:"skip-sync-storage-containers"`
-	EnableSyncExternalResourcesViaBatonId bool   `mapstructure:"enable-sync-external-resources-via-baton-id"`
-	SkipEntraIdP2LicenseFeatures          bool   `mapstructure:"skip-entra-id-p2-license-features"`
-	SyncRoleAssignments                   bool   `mapstructure:"sync-role-assignments"`
+	UseCliCredentials            bool   `mapstructure:"use-cli-credentials"`
+	AzureClientSecret            string `mapstructure:"azure-client-secret"`
+	AzureTenantId                string `mapstructure:"azure-tenant-id"`
+	AzureClientId                string `mapstructure:"azure-client-id"`
+	Mailboxsettings              bool   `mapstructure:"mailboxSettings"`
+	SkipAdGroups                 bool   `mapstructure:"skip-ad-groups"`
+	GraphDomain                  string `mapstructure:"graph-domain"`
+	SkipUnusedRoles              bool   `mapstructure:"skip-unused-roles"`
+	SkipSyncStorageContainers    bool   `mapstructure:"skip-sync-storage-containers"`
+	SkipEntraIdP2LicenseFeatures bool   `mapstructure:"skip-entra-id-p2-license-features"`
 }
 
 func (c *AzureInfrastructure) findFieldByTag(tagValue string) (any, bool) {

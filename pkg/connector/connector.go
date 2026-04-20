@@ -25,18 +25,16 @@ import (
 )
 
 type Connector struct {
-	token                                 azcore.TokenCredential
-	MailboxSettings                       bool
-	SkipAdGroups                          bool
-	organizationIDs                       []string
-	roleDefinitionsClient                 *armauthorization.RoleDefinitionsClient
-	clientFactory                         *armsubscription.ClientFactory
-	client                                *client.AzureClient
-	SkipUnusedRoles                       bool
-	skipStorageContainerSync              bool
-	enableSyncExternalResourcesViaBatonID bool
-	skipEntraIDP2LicenseFeatures          bool
-	syncRoleAssignments                   bool
+	token                        azcore.TokenCredential
+	MailboxSettings              bool
+	SkipAdGroups                 bool
+	organizationIDs              []string
+	roleDefinitionsClient        *armauthorization.RoleDefinitionsClient
+	clientFactory                *armsubscription.ClientFactory
+	client                       *client.AzureClient
+	SkipUnusedRoles              bool
+	skipStorageContainerSync     bool
+	skipEntraIDP2LicenseFeatures bool
 
 	// hierarchyOnce + hierarchyCache memoize one call to
 	// armmanagementgroups.EntitiesClient per sync. Builders that need to
@@ -58,35 +56,28 @@ type Connector struct {
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
+//
+// All builders are registered unconditionally. Gating is handled by:
+//   - OptInRequired annotations on role_assignment + management_group resource
+//     types → c1 admin UI renders an unchecked checkbox; c1 only includes these
+//     types in SyncFull.SyncResourceTypeIds after opt-in. See resource_types.go.
+//   - baton-sdk's --sync-resource-types CLI flag for standalone runs — pass a
+//     comma-separated list to restrict which builders are dispatched.
+//   - Pair-with-entra deployments deselect user/group/managed_identity via the
+//     c1 admin UI (or --sync-resource-types) rather than a bespoke connector flag.
 func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers := []connectorbuilder.ResourceSyncer{}
-
-	// If we are syncing external resources via baton id, we don't need to sync users and groups.
-	if !d.enableSyncExternalResourcesViaBatonID {
-		syncers = append(syncers, newUserBuilder(d), newGroupBuilder(d), newManagedIdentityBuilder(d))
-	}
-
-	syncers = append(
-		syncers,
+	syncers := []connectorbuilder.ResourceSyncer{
+		newUserBuilder(d),
+		newGroupBuilder(d),
+		newManagedIdentityBuilder(d),
 		newSubscriptionBuilder(d),
 		newTenantBuilder(d),
 		newResourceGroupBuilder(d),
 		newEnterpriseApplicationsBuilder(d),
 		newRoleBuilder(d),
 		newStorageAccountBuilder(d),
-	)
-
-	// Opt-in: emit Azure role assignments as TRAIT_SCOPE_BINDING resources so
-	// the c1 uplift (PR ductone/c1#16540) can classify this app as SPARSE or
-	// HYBRID and route it through the sparse-ACL UX. Default-off so existing
-	// deployments don't silently re-classify on upgrade. management_group is
-	// registered alongside so that role_assignment resources whose scope is a
-	// mgmt group reference a real emitted parent resource in the c1z.
-	if d.syncRoleAssignments {
-		syncers = append(syncers,
-			newRoleAssignmentBuilder(d),
-			newManagementGroupBuilder(d),
-		)
+		newRoleAssignmentBuilder(d),
+		newManagementGroupBuilder(d),
 	}
 
 	if !d.skipStorageContainerSync {
@@ -125,9 +116,7 @@ func NewConnectorFromToken(
 	graphDomain string,
 	skipUnusedRoles bool,
 	skipStorageContainerSync bool,
-	syncExternalResourcesViaBatonID bool,
 	skipEntraIDP2LicenseFeatures bool,
-	syncRoleAssignments bool,
 ) (*Connector, error) {
 	azureClient, err := client.NewAzureClient(ctx, httpClient, token, skipAdGroups, graphDomain)
 	if err != nil {
@@ -152,34 +141,23 @@ func NewConnectorFromToken(
 		return nil, err
 	}
 
-	c := &Connector{
-		token:                                 token,
-		MailboxSettings:                       mailboxSettings,
-		SkipAdGroups:                          skipAdGroups,
-		clientFactory:                         clientFactory,
-		client:                                azureClient,
-		organizationIDs:                       organizationIDs,
-		SkipUnusedRoles:                       skipUnusedRoles,
-		skipStorageContainerSync:              skipStorageContainerSync,
-		roleDefinitionsClient:                 roleDefinitionsClient,
-		enableSyncExternalResourcesViaBatonID: syncExternalResourcesViaBatonID,
-		skipEntraIDP2LicenseFeatures:          skipEntraIDP2LicenseFeatures,
-		syncRoleAssignments:                   syncRoleAssignments,
-	}
-
-	// When --sync-role-assignments is on, Management Group Reader is a hard
-	// prerequisite: without it we can't build the tenant→mgmt-group→sub
-	// hierarchy that the sparse-ACL tree-view UX walks, and we'd emit
-	// disconnected scope roots that render poorly in c1. Fail fast at
-	// init with an actionable error rather than letting the operator
-	// discover the regression mid-sync.
-	if syncRoleAssignments {
-		if err := c.ensureHierarchy(ctx); err != nil {
-			return nil, err
-		}
-	}
-
-	return c, nil
+	// Management Group Reader is a hard prerequisite for the role_assignment +
+	// management_group builders (they need the tenant→mgmt-group→sub hierarchy
+	// to wire scope parents cleanly). That check now lives in each builder's
+	// first-List path rather than here at init — unopted-in deployments must
+	// not fail at startup just because an optional type lacks permissions.
+	return &Connector{
+		token:                        token,
+		MailboxSettings:              mailboxSettings,
+		SkipAdGroups:                 skipAdGroups,
+		clientFactory:                clientFactory,
+		client:                       azureClient,
+		organizationIDs:              organizationIDs,
+		SkipUnusedRoles:              skipUnusedRoles,
+		skipStorageContainerSync:     skipStorageContainerSync,
+		roleDefinitionsClient:        roleDefinitionsClient,
+		skipEntraIDP2LicenseFeatures: skipEntraIDP2LicenseFeatures,
+	}, nil
 }
 
 // New returns a new instance of the connector.
@@ -194,9 +172,7 @@ func New(
 	graphDomain string,
 	skipUnusedRoles bool,
 	skipStorageContainerSync bool,
-	enableSyncExternalResourcesViaBatonID bool,
 	skipEntraIDP2LicenseFeatures bool,
-	syncRoleAssignments bool,
 ) (*Connector, error) {
 	var cred azcore.TokenCredential
 	httpClient, err := uhttp.NewClient(
@@ -242,8 +218,6 @@ func New(
 		graphDomain,
 		skipUnusedRoles,
 		skipStorageContainerSync,
-		enableSyncExternalResourcesViaBatonID,
 		skipEntraIDP2LicenseFeatures,
-		syncRoleAssignments,
 	)
 }

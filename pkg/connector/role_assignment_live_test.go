@@ -55,9 +55,7 @@ func TestLiveGrantRevoke(t *testing.T) {
 		"graph.microsoft.com", // graphDomain
 		false,                 // skipUnusedRoles
 		true,                  // skipStorageContainerSync
-		false,                 // syncExternalResourcesViaBatonID
 		true,                  // skipEntraIDP2LicenseFeatures
-		true,                  // syncRoleAssignments
 	)
 	if err != nil {
 		t.Fatalf("build connector: %v", err)

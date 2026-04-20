@@ -53,19 +53,8 @@ var Config = field.NewConfiguration(
 			field.WithDefaultValue(false),
 		),
 		field.BoolField(
-			"enable-sync-external-resources-via-baton-id",
-			field.WithDescription(`If true, the connector will use baton id to sync users and groups from external resources.
-		 This could break the sync if the Baton ID external resource is not set up correctly.`),
-			field.WithDefaultValue(false),
-		),
-		field.BoolField(
 			"skip-entra-id-p2-license-features",
 			field.WithDescription("If true, skips the features that require a 'Microsoft Entra ID P2' or 'Microsoft Entra ID Governance' license on the tenant."),
-			field.WithDefaultValue(false),
-		),
-		field.BoolField(
-			"sync-role-assignments",
-			field.WithDescription("If true, sync Azure role assignments as scope-binding resources (emits TRAIT_SCOPE_BINDING, enabling sparse-ACL / hybrid classification in c1 uplift)."),
 			field.WithDefaultValue(false),
 		),
 	},

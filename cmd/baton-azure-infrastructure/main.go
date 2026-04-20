@@ -53,9 +53,7 @@ func getConnector(ctx context.Context, ac *cfg.AzureInfrastructure) (types.Conne
 		ac.GraphDomain,
 		ac.SkipUnusedRoles,
 		ac.SkipSyncStorageContainers,
-		ac.EnableSyncExternalResourcesViaBatonId,
 		ac.SkipEntraIdP2LicenseFeatures,
-		ac.SyncRoleAssignments,
 	)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))

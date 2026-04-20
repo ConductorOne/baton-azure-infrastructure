@@ -21,11 +21,11 @@ sidebarTitle: "Microsoft Azure Infrastructure"
 | Resource group roles | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |  |
 | Storage accounts | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |  |
 | Containers | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |  |
-| Management groups | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |  |
-| Role assignments | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |
+| Management groups (opt-in) | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |  |
+| Role assignments (opt-in) | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |
 
 <Note>
-**Role assignments** sync is gated behind the **Sync role assignments** toggle (cloud-hosted) or `BATON_SYNC_ROLE_ASSIGNMENTS` (self-hosted). It is **off by default**. When enabled, the connector emits each Azure RBAC role assignment as a scope-binding resource (with `TRAIT_SCOPE_BINDING`), which unlocks sparse-ACL / hybrid classification in the C1 uplift flow.
+**Role assignments** and **Management groups** are opt-in resource types. They render as unchecked checkboxes during connector configuration in C1; enable them per tenant to emit each Azure RBAC role assignment as a scope-binding resource (with `TRAIT_SCOPE_BINDING`), which unlocks sparse-ACL / hybrid classification in the C1 uplift flow. For standalone / local runs, pass `--sync-resource-types=role_assignment,management_group,...` to the CLI.
 </Note>
 
 The Microsoft Azure Infrastructure connector works optimally when connected to a tenant licensed with either Microsoft Entra ID P2 or Microsoft Entra ID Governance. Other license types are supported, but the connector is not able to provide the same level of detail in all synced information. See the instructions below about using the **Skip Entra ID P2 License Features** configuration option if you do not have one of these license types.
@@ -142,7 +142,7 @@ A user with at least the **Cloud Application Administrator** permission in Azure
 
 - To sync subscription resources: The application must be granted at least **Reader** permissions on the subscription.
 - To provision subscription roles: The **Owner** role is required to provision access to other roles in the subscription.
-- **When "Sync role assignments" is enabled (`--sync-role-assignments=true` / `BATON_SYNC_ROLE_ASSIGNMENTS=true`): Management Group Reader is required at the tenant root management group** (`/providers/Microsoft.Management/managementGroups/{tenantId}`). The connector fails fast at startup if the application lacks this role, with an error pointing at the exact scope to grant. This permission is needed to build the mgmt-group → subscription hierarchy that the sparse-ACL tree-view UX walks.
+- **When the opt-in types (Role assignments / Management groups) are enabled: Management Group Reader is required at the tenant root management group** (`/providers/Microsoft.Management/managementGroups/{tenantId}`). The connector surfaces an actionable error at the first sync of those types if the application lacks this role. This permission is needed to build the mgmt-group → subscription hierarchy that the sparse-ACL tree-view UX walks.
 - To provision role assignments (`role_assignment` resource type): The application must have write access on `Microsoft.Authorization/roleAssignments` at the target scope — the built-in **User Access Administrator** role grants this, or a custom role including the `Microsoft.Authorization/roleAssignments/write` and `.../delete` actions.
 </Warning>
 
@@ -210,10 +210,10 @@ To complete this task, you'll need:
   **Optional.** Check the box if you want to **Skip syncing storage containers**.
   </Step>
   <Step>
-  **Optional.** Check the box if you want to **Enable syncing external resources** (identities from a shared identity source).
+  **Optional.** In the resource-type selection list, choose which resource types to sync. Most types are enabled by default; **Role assignments** and **Management groups** are opt-in and unchecked by default. Enable them to emit Azure RBAC role assignments as scope-binding resources (`TRAIT_SCOPE_BINDING`), which unlocks sparse-ACL / hybrid app classification in C1. Enabling these types requires at least **Management Group Reader** at the tenant root management group (see permissions warning above); provisioning of role assignments additionally requires write access on `Microsoft.Authorization/roleAssignments` (e.g. **User Access Administrator**) at the target scope.
   </Step>
   <Step>
-  **Optional.** Check the box if you want to **Sync role assignments**. When enabled, each Azure RBAC role assignment is emitted as a scope-binding resource (`TRAIT_SCOPE_BINDING`), enabling sparse-ACL / hybrid app classification in C1. This is **off by default** because scope-binding emission significantly increases sync volume. Requires at least **Reader** on the targeted subscription(s) and/or **Management Group Reader** at the relevant management-group scope for full coverage; provisioning of role assignments additionally requires write access on `Microsoft.Authorization/roleAssignments` (e.g. **User Access Administrator**) at the target scope.
+  **Optional — paired with another identity connector (e.g. Microsoft Entra).** If the same C1 app already receives users / groups / managed identities from another connector, deselect those resource types here to avoid duplicate emission. C1's implicit baton-ID matching resolves grants across connectors in the same app.
   </Step>
   <Step>
   If you are **NOT** running Azure infrastructure on an **Entra ID P2** or **Entra ID Governance** license, click to enable **Skip Entra ID P2 License Features**. If this option is not checked and you do not have one of the license types above, the connector will fail to sync properly.
@@ -316,15 +316,15 @@ stringData:
   # Optional: include if you want to skip syncing storage containers
   BATON_SKIP_SYNC_STORAGE_CONTAINERS: true
 
-  # Optional: include if you want to pull identities from a shared identity source
-  BATON_ENABLE_SYNC_EXTERNAL_RESOURCES_VIA_BATON_ID: true
-  BATON_FILE: <The path to the c1z file that contains identities to sync>
-
-  # Optional: include if you want to sync Azure role assignments as scope-binding
-  # resources (emits TRAIT_SCOPE_BINDING, enabling sparse-ACL / hybrid classification
-  # in C1 uplift). Off by default. For provisioning, the SP also needs write on
-  # Microsoft.Authorization/roleAssignments at the target scope.
-  BATON_SYNC_ROLE_ASSIGNMENTS: true
+  # Optional: restrict which resource types the connector syncs. When unset,
+  # all default-enabled types sync; opt-in types (role_assignment,
+  # management_group) are skipped unless listed. Use this to:
+  #   - Enable the opt-in sparse-ACL types: add role_assignment, management_group
+  #   - Pair with another identity connector (e.g. Microsoft Entra) in the same C1 app:
+  #     omit user, group, managed_identity so those come from the paired connector
+  # Example (sparse-ACL + paired-with-entra):
+  #   BATON_SYNC_RESOURCE_TYPES: tenant,management_group,subscription,resource_group,role,role_assignment,enterprise_application,storage_account,container
+  BATON_SYNC_RESOURCE_TYPES: tenant,management_group,subscription,resource_group,role,role_assignment,enterprise_application,storage_account,container
 
   # Include if you're using a license other than 'Microsoft Entra ID P2' or 'Microsoft Entra ID Governance'
   BATON_SKIP_ENTRA_ID_P2_LICENSE_FEATURES: true
