@@ -173,7 +173,7 @@ func TestBuildHierarchyIndex(t *testing.T) {
 // TestErrMgmtGroupReadRequired_Message pins the user-facing error string,
 // which operators will see in logs if the SP is missing the required
 // Management Group Reader role at tenant root. It must mention: the
-// required role name, the specific flag that triggers the requirement,
+// required role name, the resource types that triggered the requirement,
 // and the ARM scope path where the role should be granted. Regressions
 // that drop any of these three would leave operators with a generic
 // 403 and no actionable next step.
@@ -181,7 +181,7 @@ func TestErrMgmtGroupReadRequired_Message(t *testing.T) {
 	msg := errMgmtGroupReadRequired.Error()
 	for _, needle := range []string{
 		"Management Group Reader",
-		"--sync-role-assignments",
+		"role_assignment",
 		"/providers/Microsoft.Management/managementGroups/",
 	} {
 		if !contains(msg, needle) {

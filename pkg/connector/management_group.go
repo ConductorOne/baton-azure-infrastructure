@@ -26,9 +26,9 @@ import (
 // parent in the c1z. Without this builder, ScopeBindingTrait annotations
 // pointing at mgmt-group scopes dangle.
 //
-// Gated on the same --sync-role-assignments flag as roleAssignmentBuilder;
-// there's no reason to emit mgmt groups without the role assignments that
-// reference them.
+// Gated by the same OptInRequired annotation as roleAssignmentResourceType so
+// c1 admins opt both types in together; there's no reason to emit mgmt groups
+// without the role assignments that reference them.
 type managementGroupBuilder struct {
 	conn *Connector
 }
@@ -42,6 +42,13 @@ func (b *managementGroupBuilder) ResourceType(_ context.Context) *v2.ResourceTyp
 }
 
 func (b *managementGroupBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+	// Hard-require the hierarchy: management-group resources must carry parent
+	// wiring for c1's tree UX to render them correctly. Fail fast here if the
+	// SP lacks Management Group Reader. See hierarchy.go for the shared memo.
+	if err := b.conn.ensureHierarchy(ctx); err != nil {
+		return nil, "", nil, err
+	}
+
 	mgs, err := b.conn.managementGroups(ctx)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing management groups: %w", err)

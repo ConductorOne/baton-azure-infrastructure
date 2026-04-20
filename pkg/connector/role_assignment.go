@@ -199,6 +199,18 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, pTok
 // emit every mgmt-group-scope assignment in a single page, and seed the
 // bag with the pending-sub list + the mgmt-group-scope seen-set.
 func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag *pagination.GenBag[raBagState]) ([]*v2.Resource, string, annotations.Annotations, error) {
+	// Management Group Reader is a hard prerequisite: without the tenant
+	// hierarchy the scope-parent wiring produces disconnected roots and the
+	// sparse-ACL tree UX renders poorly. The sync.Once memoization means
+	// paginated resumes after the first init call are free. Gate moved here
+	// from connector init so unopted-in deployments don't fail at startup.
+	// Placed inside listInit (rather than the top of List) so the unknown-
+	// phase error path doesn't need a live Connector — keeps pagination-
+	// parsing unit tests working with a bare builder. See hierarchy.go.
+	if err := b.conn.ensureHierarchy(ctx); err != nil {
+		return nil, "", nil, err
+	}
+
 	// Enumerate subscriptions (IDs only; we walk each one in its own page
 	// during the sub phase).
 	subsPager := b.conn.clientFactory.NewSubscriptionsClient().NewListPager(nil)

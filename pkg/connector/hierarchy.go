@@ -42,23 +42,26 @@ const (
 type hierarchyIndex map[string]*v2.ResourceId
 
 // errMgmtGroupReadRequired is returned when the SP lacks Management Group
-// Reader (403 from the entities API). Surfaced to the operator as a
-// fatal error during connector init when --sync-role-assignments=true,
-// and silently logged as a degradation otherwise.
+// Reader (403 from the entities API). Surfaced when the role_assignment or
+// management_group builders run their first List and hit the permission
+// failure; silently logged as a degradation for callers (subscriptionBuilder,
+// etc.) that only need the hierarchy as a nice-to-have.
 var errMgmtGroupReadRequired = fmt.Errorf(
-	"baton-azure-infrastructure: --sync-role-assignments requires the " +
-		"service principal to have 'Management Group Reader' (or equivalent) " +
-		"at the tenant root management group. Grant this role at " +
-		"/providers/Microsoft.Management/managementGroups/{tenantId} and retry")
+	"baton-azure-infrastructure: syncing role_assignment or management_group " +
+		"resources requires the service principal to have 'Management Group Reader' " +
+		"(or equivalent) at the tenant root management group. Grant this role at " +
+		"/providers/Microsoft.Management/managementGroups/{tenantId} and retry, " +
+		"or deselect these resource types in the c1 admin UI")
 
 // ensureHierarchy eagerly loads the tenant hierarchy and propagates any
-// permission or API error. Used during connector init when
-// --sync-role-assignments=true so the operator sees an actionable error
-// at startup rather than a silent tree-view regression at sync time.
+// permission or API error. Called at the start of roleAssignmentBuilder.List
+// and managementGroupBuilder.List — those builders cannot wire scope
+// parents cleanly without a hierarchy, so they fail with an actionable
+// error when the entities API rejects.
 //
 // Shares the sync.Once with hierarchy(): whichever fires first populates
-// the cache; the other becomes a no-op. Caller should invoke at most
-// one of these per Connector lifetime.
+// the cache; the other becomes a no-op. Paginated List calls pay the cost
+// only on the first page.
 func (c *Connector) ensureHierarchy(ctx context.Context) error {
 	var loadErr error
 	c.hierarchyOnce.Do(func() {
@@ -72,11 +75,11 @@ func (c *Connector) ensureHierarchy(ctx context.Context) error {
 // hierarchy returns the memoized tenant hierarchy, loading on first call
 // if not yet populated. Errors are swallowed: this is the graceful-
 // degrade path used by callers for which mgmt-group-read is a nice-to-
-// have rather than a hard requirement (e.g. subscriptionBuilder when
-// --sync-role-assignments is off).
+// have rather than a hard requirement (e.g. subscriptionBuilder).
 //
-// When --sync-role-assignments=true the connector init path calls
-// ensureHierarchy first; this method then returns the cached result.
+// When the opted-in path runs (roleAssignmentBuilder or managementGroupBuilder),
+// those builders call ensureHierarchy first and surface errors; this method
+// then returns the cached result on subsequent calls.
 func (c *Connector) hierarchy(ctx context.Context) hierarchyIndex {
 	c.hierarchyOnce.Do(func() {
 		idx, err := loadHierarchy(ctx, c.token, c.client.ArmOptions())
