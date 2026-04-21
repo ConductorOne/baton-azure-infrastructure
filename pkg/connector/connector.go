@@ -65,8 +65,8 @@ type Connector struct {
 //     comma-separated list to restrict which builders are dispatched.
 //   - Pair-with-entra deployments deselect user/group/managed_identity via the
 //     c1 admin UI (or --sync-resource-types) rather than a bespoke connector flag.
-func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers := []connectorbuilder.ResourceSyncer{
+func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncerV2 {
+	syncers := []connectorbuilder.ResourceSyncerV2{
 		newUserBuilder(d),
 		newGroupBuilder(d),
 		newManagedIdentityBuilder(d),

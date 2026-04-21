@@ -9,9 +9,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -33,9 +33,9 @@ func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return roleResourceType
 }
 
-func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	if parentResourceID == nil {
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 	var rv []*v2.Resource
 	subscriptionID := parentResourceID.Resource
@@ -46,7 +46,7 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	for pagerRoles.More() {
 		resp, err := pagerRoles.NextPage(ctx)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		// Iterate over role definitions
@@ -58,7 +58,7 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 
 				err := r.cacheRoleAssignments(ctx, subscriptionID)
 				if err != nil {
-					return nil, "", nil, err
+					return nil, nil, err
 				}
 				// omit ok since we know the key exists
 				assignments, _ := r.cache.Get(subscriptionID)
@@ -69,22 +69,22 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 				}
 			}
 
-			rs, err := roleResource(ctx, role, &v2.ResourceId{
+			rsrc, err := roleResource(ctx, role, &v2.ResourceId{
 				ResourceType: subscriptionsResourceType.Id,
 				Resource:     StringValue(&subscriptionID),
 			})
 			if err != nil {
-				return nil, "", nil, err
+				return nil, nil, err
 			}
 
-			rv = append(rv, rs)
+			rv = append(rv, rsrc)
 		}
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
-func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	var rv []*v2.Entitlement
 	options := []ent.EntitlementOption{
 		ent.WithDisplayName(fmt.Sprintf("%s Role Owner", resource.DisplayName)),
@@ -100,10 +100,10 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *
 	}
 	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeAssigned, options...))
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
-func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
 	var (
 		subscriptionID, roleID string
 		rv                     []*v2.Grant
@@ -118,7 +118,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 
 	err := r.cacheRoleAssignments(ctx, subscriptionID)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	assignments, _ := r.cache.Get(subscriptionID)
@@ -137,7 +137,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 		gr = grant.NewGrant(resource, typeAssigned, principalId)
 		rv = append(rv, gr)
 	}
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
 func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {

@@ -10,8 +10,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -41,17 +39,17 @@ func (b *managementGroupBuilder) ResourceType(_ context.Context) *v2.ResourceTyp
 	return managementGroupResourceType
 }
 
-func (b *managementGroupBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (b *managementGroupBuilder) List(ctx context.Context, _ *v2.ResourceId, _ rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	// Hard-require the hierarchy: management-group resources must carry parent
 	// wiring for c1's tree UX to render them correctly. Fail fast here if the
 	// SP lacks Management Group Reader. See hierarchy.go for the shared memo.
 	if err := b.conn.ensureHierarchy(ctx); err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	mgs, err := b.conn.managementGroups(ctx)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing management groups: %w", err)
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: listing management groups: %w", err)
 	}
 
 	// One-shot tenant-hierarchy load so managementGroupResource can set
@@ -65,21 +63,21 @@ func (b *managementGroupBuilder) List(ctx context.Context, _ *v2.ResourceId, _ *
 	for _, mg := range mgs {
 		resource, err := managementGroupResource(mg, idx)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 		if resource != nil {
 			rv = append(rv, resource)
 		}
 	}
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
-func (b *managementGroupBuilder) Entitlements(_ context.Context, _ *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (b *managementGroupBuilder) Entitlements(_ context.Context, _ *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
-func (b *managementGroupBuilder) Grants(_ context.Context, _ *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (b *managementGroupBuilder) Grants(_ context.Context, _ *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 // managementGroupResource builds a baton resource for an Azure management group.

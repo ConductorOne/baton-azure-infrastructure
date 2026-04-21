@@ -13,7 +13,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
@@ -31,18 +30,18 @@ func (usr *containerBuilder) ResourceType(ctx context.Context) *v2.ResourceType 
 	return containerResourceType
 }
 
-func (usr *containerBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (usr *containerBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	if parentResourceID == nil {
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 
 	if parentResourceID.ResourceType != storageAccountResourceType.Id {
-		return nil, "", nil, fmt.Errorf("invalid resource type: %s", parentResourceID.ResourceType)
+		return nil, nil, fmt.Errorf("invalid resource type: %s", parentResourceID.ResourceType)
 	}
 
 	storageId, err := newStorageResourceSplitIdDataFromConnectorId(parentResourceID.Resource)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	factory, err := armstorage.NewClientFactory(
@@ -52,7 +51,7 @@ func (usr *containerBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	)
 
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	pager := factory.NewBlobContainersClient().
@@ -67,7 +66,7 @@ func (usr *containerBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	for pager.More() {
 		result, err := pager.NextPage(ctx)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		temp, err := ConvertErr(result.Value, func(container *armstorage.ListContainerItem) (*v2.Resource, error) {
@@ -95,17 +94,17 @@ func (usr *containerBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 		})
 
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		resources = append(resources, temp...)
 	}
 
-	return resources, "", nil, nil
+	return resources, nil, nil
 }
 
 // Entitlements always returns an empty slice for users.
-func (usr *containerBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (usr *containerBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	rv := []*v2.Entitlement{
 		entitlement.NewPermissionEntitlement(
 			resource,
@@ -130,7 +129,7 @@ func (usr *containerBuilder) Entitlements(_ context.Context, resource *v2.Resour
 		rv = append(rv, ent)
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
 func (usr *containerBuilder) getRoleDefinition(ctx context.Context, roleDefinitionId string) (armauthorization.RoleDefinitionsClientGetByIDResponse, error) {
@@ -155,28 +154,28 @@ func (usr *containerBuilder) getRoleDefinition(ctx context.Context, roleDefiniti
 }
 
 // Grants always returns an empty slice for users since they don't have any entitlements.
-func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
 	if resource.ParentResourceId == nil || resource.ParentResourceId.ResourceType != storageAccountResourceType.Id {
-		return nil, "", nil, fmt.Errorf("container resource must have a parent resource from type %s", storageAccountResourceType.Id)
+		return nil, nil, fmt.Errorf("container resource must have a parent resource from type %s", storageAccountResourceType.Id)
 	}
 
 	// RoleDefinitionsIds
 	bag := pagination.GenBag[string]{}
 
-	err := bag.Unmarshal(pToken.Token)
+	err := bag.Unmarshal(opts.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	parsedParentId, err := newStorageResourceSplitIdDataFromConnectorId(resource.ParentResourceId.Resource)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	if bag.Current() == nil {
 		idSplit := strings.Split(resource.Id.Resource, ":")
 		if len(idSplit) != 2 {
-			return nil, "", nil, fmt.Errorf("invalid resource id: %s", resource.Id.Resource)
+			return nil, nil, fmt.Errorf("invalid resource id: %s", resource.Id.Resource)
 		}
 
 		containerName := idSplit[1]
@@ -184,7 +183,7 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 		scope := fmt.Sprintf("%s/blobServices/default/containers/%s", parsedParentId.AzureId(), containerName)
 		assignments, err := usr.client.GetRoleAssignments(ctx, parsedParentId.subscriptionID, scope)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		grants, err := ConvertErr(assignments, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
@@ -198,15 +197,15 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 			)
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		nextToken, err := bag.Marshal()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
-		return grants, nextToken, nil, nil
+		return grants, &rs.SyncOpResults{NextPageToken: nextToken}, nil
 	}
 
 	state := bag.Pop()
@@ -214,19 +213,19 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 	roleDefinitionId := StringValue(state)
 	roleDefinition, err := usr.getRoleDefinition(ctx, roleDefinitionId)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	actions, err := rolemapper.ContainerPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	var grants []*v2.Grant
 	for _, action := range actions {
 		plainRoleId, err := roleIdFromRoleDefinitionId(roleDefinitionId)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		roleResourceId, err := rs.NewResourceID(
@@ -235,12 +234,12 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 		)
 
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		newGrant, err := grantFromRole(resource, action, roleResourceId)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		grants = append(grants, newGrant)
@@ -248,10 +247,10 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 
 	nextToken, err := bag.Marshal()
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
-	return grants, nextToken, nil, nil
+	return grants, &rs.SyncOpResults{NextPageToken: nextToken}, nil
 }
 
 func newContainerBuilder(conn *Connector) *containerBuilder {
