@@ -38,11 +38,9 @@ const (
 )
 
 type enterpriseApplicationsBuilder struct {
-	client *client.AzureClient
-
-	// organizationIDs is a map of organization IDs that the user is a member of. needs to be set on the builder
-	organizationIDs map[string]struct{}
-	skipAdGroups    bool
+	client       *client.AzureClient
+	conn         *Connector
+	skipAdGroups bool
 }
 
 // spFromSession fetches the cached ServicePrincipal via opts.Session; falls
@@ -82,6 +80,14 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 		return nil, nil, err
 	}
 
+	// Lazily fetch the set of organization IDs the SP can see. Memoized via
+	// sync.Once on the Connector — deferred out of New() so `capabilities`
+	// generation works without Azure credentials.
+	orgIDs, err := e.conn.organizationIDs(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	var applicationsOwned []*client.ServicePrincipal
 
 	// Bulk-populate the session-store cache with this page's service
@@ -93,7 +99,7 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 		toCache = make(map[string]*client.ServicePrincipal)
 	}
 	for _, sp := range resp.Value {
-		if _, ok := e.organizationIDs[sp.AppOwnerOrganizationId]; ok {
+		if _, ok := orgIDs[sp.AppOwnerOrganizationId]; ok {
 			if toCache != nil {
 				toCache[sp.ID] = sp
 			}
@@ -374,16 +380,10 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 }
 
 func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuilder {
-	organizationIDs := map[string]struct{}{}
-
-	for _, d := range c.organizationIDs {
-		organizationIDs[d] = struct{}{}
-	}
-
 	return &enterpriseApplicationsBuilder{
-		client:          c.client,
-		organizationIDs: organizationIDs,
-		skipAdGroups:    c.SkipAdGroups,
+		client:       c.client,
+		conn:         c,
+		skipAdGroups: c.SkipAdGroups,
 	}
 }
 
