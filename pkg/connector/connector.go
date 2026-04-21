@@ -4,17 +4,18 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"sync"
+
+	cfg "github.com/conductorone/baton-azure-infrastructure/pkg/config"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/cli"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
 
 	"github.com/sourcegraph/conc/iter"
-
-	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
-
-	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -160,21 +161,13 @@ func NewConnectorFromToken(
 	}, nil
 }
 
-// New returns a new instance of the connector.
-func New(
-	ctx context.Context,
-	useCliCredentials bool,
-	tenantID,
-	clientID,
-	clientSecret string,
-	mailboxSettings bool,
-	skipAdGroups bool,
-	graphDomain string,
-	skipUnusedRoles bool,
-	skipStorageContainerSync bool,
-	skipEntraIDP2LicenseFeatures bool,
-) (*Connector, error) {
-	var cred azcore.TokenCredential
+// New is the containerized entry point for the connector. Invoked by
+// config.RunConnector via cli.NewConnector[*cfg.AzureInfrastructure]. Builds
+// the Azure credential chain based on the selected auth method (or falls back
+// to DefaultAzureCredential when neither CLI credentials nor SP+secret is
+// provided), constructs the Connector, and returns it along with empty
+// builder options.
+func New(ctx context.Context, c *cfg.AzureInfrastructure, _ *cli.ConnectorOpts) (connectorbuilder.ConnectorBuilderV2, []connectorbuilder.Opt, error) {
 	httpClient, err := uhttp.NewClient(
 		ctx,
 		[]uhttp.Option{
@@ -182,16 +175,17 @@ func New(
 		}...,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	var cred azcore.TokenCredential
 	switch {
-	case useCliCredentials:
+	case c.UseCliCredentials:
 		cred, err = azidentity.NewAzureCLICredential(nil)
-	case !IsEmpty(tenantID) && !IsEmpty(clientID) && !IsEmpty(clientSecret):
-		cred, err = azidentity.NewClientSecretCredential(tenantID,
-			clientID,
-			clientSecret,
+	case !IsEmpty(c.AzureTenantId) && !IsEmpty(c.AzureClientId) && !IsEmpty(c.AzureClientSecret):
+		cred, err = azidentity.NewClientSecretCredential(c.AzureTenantId,
+			c.AzureClientId,
+			c.AzureClientSecret,
 			&azidentity.ClientSecretCredentialOptions{
 				ClientOptions: azcore.ClientOptions{
 					Transport: httpClient,
@@ -202,22 +196,26 @@ func New(
 			ClientOptions: azcore.ClientOptions{
 				Transport: httpClient,
 			},
-			TenantID: tenantID,
+			TenantID: c.AzureTenantId,
 		})
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return NewConnectorFromToken(
+	conn, err := NewConnectorFromToken(
 		ctx,
 		httpClient,
 		cred,
-		mailboxSettings,
-		skipAdGroups,
-		graphDomain,
-		skipUnusedRoles,
-		skipStorageContainerSync,
-		skipEntraIDP2LicenseFeatures,
+		c.Mailboxsettings,
+		c.SkipAdGroups,
+		c.GraphDomain,
+		c.SkipUnusedRoles,
+		c.SkipSyncStorageContainers,
+		c.SkipEntraIdP2LicenseFeatures,
 	)
+	if err != nil {
+		return nil, nil, err
+	}
+	return conn, nil, nil
 }
