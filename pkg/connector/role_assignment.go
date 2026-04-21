@@ -8,16 +8,17 @@ import (
 	"path"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/session"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -41,36 +42,42 @@ const roleAssignmentAssignedEntitlementSlug = typeAssigned
 // azure-sdk-for-go typed armauthorization client rather than hand-rolled REST.
 type roleAssignmentBuilder struct {
 	conn *Connector
-
-	// principalTypeCache memoizes getPrincipalType(ctx, conn, principalID) results
-	// across calls. A single principal typically holds many role assignments, so
-	// without this cache Grants() would hit Microsoft Graph's directoryObjects
-	// endpoint once per binding — throttling risk at customer scale. sync.Map
-	// because Grants may be invoked concurrently per resource.
-	principalTypeCache sync.Map // map[principalID string] -> principalType string
 }
+
+// principalTypePrefix is the session-store key prefix for the
+// principal-type cache. See principalTypeForID for access patterns.
+// Separated from other connector caches so entries don't collide.
+const principalTypePrefix = "azinfra-role-assignment-principal-type:"
 
 func newRoleAssignmentBuilder(conn *Connector) *roleAssignmentBuilder {
 	return &roleAssignmentBuilder{conn: conn}
 }
 
 // principalTypeForID resolves the Graph directoryObjects type for a principal,
-// consulting the per-builder cache first. Returns "" on lookup failure so the
-// caller can drop the grant without propagating the error (degrade-gracefully
-// pattern used elsewhere in this connector). Failures are logged at Warn so
-// dropped grants are visible in production (Debug would hide silent data
-// loss).
+// consulting the session-store cache first. Returns "" on lookup failure so
+// the caller can drop the grant without propagating the error (degrade-
+// gracefully pattern used elsewhere in this connector). Failures are logged
+// at Warn so dropped grants are visible in production (Debug would hide
+// silent data loss).
 //
 // The cache holds negative results too: when a lookup returns "" (either the
-// fallback chain was exhausted or it errored), we still store "" so subsequent
-// bindings for the same principal don't re-query Graph. Without this, a single
-// tenancy-foreign principal that holds N role assignments produces N Graph
-// roundtrips and N Warn log lines — enough to swamp operator logs on customer
-// syncs.
-func (b *roleAssignmentBuilder) principalTypeForID(ctx context.Context, principalID string) string {
-	if v, ok := b.principalTypeCache.Load(principalID); ok {
-		if s, ok := v.(string); ok {
-			return s
+// fallback chain was exhausted or it errored), we still store "" so
+// subsequent bindings for the same principal don't re-query Graph. Without
+// this, a single tenancy-foreign principal that holds N role assignments
+// produces N Graph roundtrips and N Warn log lines — enough to swamp
+// operator logs on customer syncs.
+//
+// Session store vs in-process map: containerized connectors die between
+// sync runs, so a per-builder in-process cache provides zero cross-run
+// benefit. The session store persists cache entries across runs via the
+// SDK-managed SQLite store, and also lets role.Grants share the same cache
+// when it migrates to session store in a future revision. opts.Session may
+// be nil in test harnesses that bypass the SDK — in that case we fall back
+// to a live Graph call (no caching).
+func (b *roleAssignmentBuilder) principalTypeForID(ctx context.Context, opts rs.SyncOpAttrs, principalID string) string {
+	if opts.Session != nil {
+		if cached, found, err := session.GetJSON[string](ctx, opts.Session, principalID, sessions.WithPrefix(principalTypePrefix)); err == nil && found {
+			return cached
 		}
 	}
 	pt, err := getPrincipalType(ctx, b.conn, principalID)
@@ -82,10 +89,14 @@ func (b *roleAssignmentBuilder) principalTypeForID(ctx context.Context, principa
 		)
 		// Cache the miss so we don't re-query on every subsequent role
 		// assignment that references this principal.
-		b.principalTypeCache.Store(principalID, "")
+		if opts.Session != nil {
+			_ = session.SetJSON(ctx, opts.Session, principalID, "", sessions.WithPrefix(principalTypePrefix))
+		}
 		return ""
 	}
-	b.principalTypeCache.Store(principalID, pt)
+	if opts.Session != nil {
+		_ = session.SetJSON(ctx, opts.Session, principalID, pt, sessions.WithPrefix(principalTypePrefix))
+	}
 	return pt
 }
 
@@ -469,12 +480,12 @@ func batonToAzurePrincipalType(batonResourceType string) *armauthorization.Princ
 // We resolve principal type via the per-builder cache (backed by
 // getPrincipalType, which hits Graph directoryObjects) so that repeat
 // principals across many bindings don't each incur a Graph roundtrip.
-func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
 	principalID, parsedOK := parsePrincipalFromRoleAssignmentResourceID(resource.Id.Resource)
 	if !parsedOK || principalID == "" {
 		return nil, nil, nil
 	}
-	principalType := b.principalTypeForID(ctx, principalID)
+	principalType := b.principalTypeForID(ctx, opts, principalID)
 	if principalType == "" {
 		// Graph lookup failed or principal is unknown (logged at Warn inside
 		// principalTypeForID). Emit no grant rather than failing the whole

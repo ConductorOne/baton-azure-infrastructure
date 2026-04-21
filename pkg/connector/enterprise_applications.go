@@ -18,7 +18,9 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/session"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 )
@@ -27,15 +29,40 @@ const (
 	ownersStr     = "owners"
 	appRoleStr    = "appRole"
 	assignmentStr = "assignment"
+
+	// servicePrincipalPrefix is the session-store key prefix for the
+	// service-principal metadata cache. Service principal documents are
+	// fetched once and reused across List / Entitlements / Grants to avoid
+	// N re-lookups against Graph for the same application.
+	servicePrincipalPrefix = "azinfra-ent-app-sp:"
 )
 
 type enterpriseApplicationsBuilder struct {
 	client *client.AzureClient
-	cache  *GenericCache[*client.ServicePrincipal]
 
 	// organizationIDs is a map of organization IDs that the user is a member of. needs to be set on the builder
 	organizationIDs map[string]struct{}
 	skipAdGroups    bool
+}
+
+// spFromSession fetches the cached ServicePrincipal via opts.Session; falls
+// back to a live Graph lookup on miss and populates the cache. Returns
+// (nil, nil) only if Graph itself returns empty (shouldn't happen — Graph
+// errors propagate instead).
+func (e *enterpriseApplicationsBuilder) spFromSession(ctx context.Context, opts rs.SyncOpAttrs, principalID string) (*client.ServicePrincipal, error) {
+	if opts.Session != nil {
+		if sp, found, err := session.GetJSON[*client.ServicePrincipal](ctx, opts.Session, principalID, sessions.WithPrefix(servicePrincipalPrefix)); err == nil && found {
+			return sp, nil
+		}
+	}
+	sp, err := e.client.ServicePrincipal(ctx, principalID)
+	if err != nil {
+		return nil, err
+	}
+	if opts.Session != nil {
+		_ = session.SetJSON(ctx, opts.Session, principalID, sp, sessions.WithPrefix(servicePrincipalPrefix))
+	}
+	return sp, nil
 }
 
 func (e *enterpriseApplicationsBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -57,11 +84,24 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 
 	var applicationsOwned []*client.ServicePrincipal
 
+	// Bulk-populate the session-store cache with this page's service
+	// principals so subsequent Entitlements / Grants calls skip the
+	// per-principal Graph roundtrip. When opts.Session is nil (test
+	// harness) the later calls fall through to a live Graph lookup.
+	var toCache map[string]*client.ServicePrincipal
+	if opts.Session != nil {
+		toCache = make(map[string]*client.ServicePrincipal)
+	}
 	for _, sp := range resp.Value {
 		if _, ok := e.organizationIDs[sp.AppOwnerOrganizationId]; ok {
-			e.cache.Set(sp.ID, sp)
+			if toCache != nil {
+				toCache[sp.ID] = sp
+			}
 			applicationsOwned = append(applicationsOwned, sp)
 		}
+	}
+	if len(toCache) > 0 {
+		_ = session.SetManyJSON(ctx, opts.Session, toCache, sessions.WithPrefix(servicePrincipalPrefix))
 	}
 
 	resources := make([]*v2.Resource, len(applicationsOwned))
@@ -83,7 +123,7 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 	return resources, &rs.SyncOpResults{NextPageToken: pageToken}, nil
 }
 
-func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
+func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	var err error
 
 	// https://learn.microsoft.com/en-us/graph/api/resources/approleassignment?view=graph-rest-1.0
@@ -141,12 +181,9 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 	}
 
 	principalId := resource.Id.Resource
-	servicePrincipal, err := e.cache.GetOrSet(principalId, func() (*client.ServicePrincipal, error) {
-		return e.client.ServicePrincipal(ctx, principalId)
-	})
-
+	servicePrincipal, err := e.spFromSession(ctx, opts, principalId)
 	if err != nil {
-		return nil, nil, fmt.Errorf("baton-azure-infrastructure: failed to get service principal on cache: %w", err)
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: failed to get service principal: %w", err)
 	}
 
 	for _, appRole := range servicePrincipal.AppRoles {
@@ -219,9 +256,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	ps := b.Current()
 	switch ps.ResourceTypeID {
 	case assignmentStr:
-		principalResp, err := e.cache.GetOrSet(principalId, func() (*client.ServicePrincipal, error) {
-			return e.client.ServicePrincipal(ctx, principalId)
-		})
+		principalResp, err := e.spFromSession(ctx, opts, principalId)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -347,7 +382,6 @@ func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuild
 
 	return &enterpriseApplicationsBuilder{
 		client:          c.client,
-		cache:           NewGenericCache[*client.ServicePrincipal](),
 		organizationIDs: organizationIDs,
 		skipAdGroups:    c.SkipAdGroups,
 	}

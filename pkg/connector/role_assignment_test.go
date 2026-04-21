@@ -11,7 +11,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/session"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -154,54 +156,128 @@ func TestRoleDefinitionIDForScope(t *testing.T) {
 	}
 }
 
+// memSessionStore is an in-process sessions.SessionStore for unit tests.
+// Ignores options (no sync-id / prefix semantics) — callers are
+// responsible for building fully-qualified keys themselves. Just a
+// `map[string][]byte` behind the interface.
+type memSessionStore struct {
+	m map[string][]byte
+}
+
+func newMemSessionStore() *memSessionStore {
+	return &memSessionStore{m: map[string][]byte{}}
+}
+
+func (s *memSessionStore) Get(ctx context.Context, key string, opts ...sessions.SessionStoreOption) ([]byte, bool, error) {
+	k := keyWithPrefix(ctx, key, opts...)
+	v, ok := s.m[k]
+	return v, ok, nil
+}
+
+func (s *memSessionStore) GetMany(ctx context.Context, keys []string, opts ...sessions.SessionStoreOption) (map[string][]byte, []string, error) {
+	hits := map[string][]byte{}
+	var misses []string
+	for _, k := range keys {
+		full := keyWithPrefix(ctx, k, opts...)
+		if v, ok := s.m[full]; ok {
+			hits[k] = v
+		} else {
+			misses = append(misses, k)
+		}
+	}
+	return hits, misses, nil
+}
+
+func (s *memSessionStore) Set(ctx context.Context, key string, value []byte, opts ...sessions.SessionStoreOption) error {
+	s.m[keyWithPrefix(ctx, key, opts...)] = value
+	return nil
+}
+
+func (s *memSessionStore) SetMany(ctx context.Context, values map[string][]byte, opts ...sessions.SessionStoreOption) error {
+	for k, v := range values {
+		s.m[keyWithPrefix(ctx, k, opts...)] = v
+	}
+	return nil
+}
+
+func (s *memSessionStore) Delete(ctx context.Context, key string, opts ...sessions.SessionStoreOption) error {
+	delete(s.m, keyWithPrefix(ctx, key, opts...))
+	return nil
+}
+
+func (s *memSessionStore) Clear(ctx context.Context, opts ...sessions.SessionStoreOption) error {
+	s.m = map[string][]byte{}
+	return nil
+}
+
+func (s *memSessionStore) GetAll(ctx context.Context, pageToken string, opts ...sessions.SessionStoreOption) (map[string][]byte, string, error) {
+	out := map[string][]byte{}
+	for k, v := range s.m {
+		out[k] = v
+	}
+	return out, "", nil
+}
+
+func keyWithPrefix(ctx context.Context, key string, opts ...sessions.SessionStoreOption) string {
+	bag := &sessions.SessionStoreBag{}
+	for _, o := range opts {
+		_ = o(ctx, bag)
+	}
+	if bag.Prefix != "" {
+		return bag.Prefix + key
+	}
+	return key
+}
+
 func TestPrincipalTypeCache_HitReturnsStoredValue(t *testing.T) {
-	// Covers the pure cache-hit path of principalTypeForID: when the cache is
-	// pre-populated with a string value, the function must return it without
-	// touching Graph. The miss path (cache empty OR non-string entry) calls
-	// getPrincipalType which requires a live Connector + Graph token and is
-	// therefore exercised only in live lab validation.
+	// Pre-populate the session store with a principal-type entry and verify
+	// principalTypeForID returns it on hit without touching Graph. The miss
+	// path (cache empty) calls getPrincipalType which requires a live
+	// Connector + Graph token and is exercised only in live lab validation.
 	b := &roleAssignmentBuilder{}
 	const pid = "4d3a9fc4-022d-4db4-9215-4a25d2ece45a"
 	const wantType = "#microsoft.graph.user"
-	b.principalTypeCache.Store(pid, wantType)
 
-	// Use context.Background() rather than nil — principalTypeForID's cache-hit
-	// path doesn't actually consult the context, but staticcheck (SA1012)
-	// rightly refuses to let us pass nil to a function that accepts a
-	// context.Context.
+	store := newMemSessionStore()
 	ctx := context.Background()
+	if err := session.SetJSON(ctx, store, pid, wantType, sessions.WithPrefix(principalTypePrefix)); err != nil {
+		t.Fatalf("seed session store: %v", err)
+	}
+	opts := rs.SyncOpAttrs{Session: store}
 
-	got := b.principalTypeForID(ctx, pid)
+	got := b.principalTypeForID(ctx, opts, pid)
 	if got != wantType {
 		t.Errorf("principalTypeForID cache hit returned %q, want %q", got, wantType)
 	}
 
 	// Second call must still hit the cache (no eviction).
-	got = b.principalTypeForID(ctx, pid)
+	got = b.principalTypeForID(ctx, opts, pid)
 	if got != wantType {
 		t.Errorf("principalTypeForID second cache hit returned %q, want %q", got, wantType)
 	}
 }
 
 func TestPrincipalTypeCache_NegativeHitReturnsEmpty(t *testing.T) {
-	// Covers the negative-cache path: once getPrincipalType has failed or
-	// returned "" for a principal, subsequent lookups must return "" without
-	// re-querying Graph. Without this the same principal triggers a full
-	// fallback-chain attempt (and a Warn log) on every role assignment that
-	// references it, flooding operator logs at customer scale.
+	// Once getPrincipalType has failed or returned "" for a principal, the
+	// empty string gets cached so subsequent lookups return "" without
+	// re-querying Graph. Verify that prepopulating "" in the session store
+	// short-circuits the lookup path.
 	b := &roleAssignmentBuilder{}
 	const pid = "00000000-0000-0000-0000-000000000000"
-	b.principalTypeCache.Store(pid, "")
 
+	store := newMemSessionStore()
 	ctx := context.Background()
+	if err := session.SetJSON(ctx, store, pid, "", sessions.WithPrefix(principalTypePrefix)); err != nil {
+		t.Fatalf("seed session store: %v", err)
+	}
+	opts := rs.SyncOpAttrs{Session: store}
 
-	got := b.principalTypeForID(ctx, pid)
+	got := b.principalTypeForID(ctx, opts, pid)
 	if got != "" {
 		t.Errorf("principalTypeForID negative-cache hit returned %q, want empty string", got)
 	}
 
-	// Second call must still hit the cache (no promotion, no eviction).
-	got = b.principalTypeForID(ctx, pid)
+	got = b.principalTypeForID(ctx, opts, pid)
 	if got != "" {
 		t.Errorf("principalTypeForID second negative-cache hit returned %q, want empty string", got)
 	}
