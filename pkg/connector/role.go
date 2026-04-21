@@ -11,7 +11,6 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/session"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
-	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 	"github.com/google/uuid"
@@ -110,40 +109,21 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ r
 	return rv, nil, nil
 }
 
-func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
-	var (
-		subscriptionID, roleID string
-		rv                     []*v2.Grant
-		gr                     *v2.Grant
-		principalId            *v2.ResourceId
-	)
-	arr := strings.Split(resource.Id.Resource, ":")
-	if len(arr) == 2 {
-		subscriptionID = arr[1]
-		roleID = arr[0]
-	}
-
-	assignments, err := r.roleAssignments(ctx, opts, subscriptionID)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	for _, assignment := range assignments {
-		roleDefinitionID := subscriptionRoleId(subscriptionID, roleID)
-		if roleDefinitionID != *assignment.Properties.RoleDefinitionID {
-			continue
-		}
-
-		principalType, err := getPrincipalType(ctx, r.conn, *assignment.Properties.PrincipalID)
-		if err != nil {
-			continue
-		}
-
-		principalId = getPrincipalIDResource(principalType, assignment)
-		gr = grant.NewGrant(resource, typeAssigned, principalId)
-		rv = append(rv, gr)
-	}
-	return rv, nil, nil
+// Grants returns no direct grants. In the sparse-ACL / ScopeBinding model,
+// the role_assignment resource type is the authoritative carrier for
+// (principal, role, scope) triples — the same information that classic
+// role.Grants used to emit as user → role:<id>:assigned grants. Emitting
+// both paths produces redundant data that c1's sparse-ACL read path doesn't
+// need and that inflates c1z payloads by ~67% on real tenants.
+//
+// The role resource type is still useful (it exposes role-name / description
+// metadata and the :assigned entitlement for c1 to resolve against), so the
+// builder stays registered — it just no longer projects access data that
+// role_assignment already carries.
+//
+// See role_assignment.go for the authoritative grant emission path.
+func (r *roleBuilder) Grants(_ context.Context, _ *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
