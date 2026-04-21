@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
 
@@ -14,16 +13,23 @@ import (
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/session"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 )
+
+// containerRoleDefPrefix is the session-store key prefix for the
+// container-builder's role-definition lookup cache. Deduplicates the
+// per-container-scope role-definition Graph calls so a customer with
+// thousands of containers referencing the same handful of role
+// definitions only pays for N unique lookups.
+const containerRoleDefPrefix = "azinfra-container-role-def:"
 
 // containerBuilder syncs Container given an StorageAccount.
 type containerBuilder struct {
-	client         *client.AzureClient
-	conn           *Connector
-	roleCache      map[string]armauthorization.RoleDefinitionsClientGetByIDResponse
-	roleCacheMutex sync.RWMutex
+	client *client.AzureClient
+	conn   *Connector
 }
 
 func (usr *containerBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -132,24 +138,27 @@ func (usr *containerBuilder) Entitlements(_ context.Context, resource *v2.Resour
 	return rv, nil, nil
 }
 
-func (usr *containerBuilder) getRoleDefinition(ctx context.Context, roleDefinitionId string) (armauthorization.RoleDefinitionsClientGetByIDResponse, error) {
-	usr.roleCacheMutex.RLock()
-	roleDefinition, ok := usr.roleCache[roleDefinitionId]
-	usr.roleCacheMutex.RUnlock()
-
-	if ok {
-		return roleDefinition, nil
+// getRoleDefinition resolves a role definition by ID, consulting the
+// session-store cache first and falling through to a live Graph lookup on
+// miss. opts.Session may be nil in test harnesses; in that case we always
+// hit Graph.
+func (usr *containerBuilder) getRoleDefinition(ctx context.Context, opts rs.SyncOpAttrs, roleDefinitionId string) (armauthorization.RoleDefinitionsClientGetByIDResponse, error) {
+	if opts.Session != nil {
+		cached, found, err := session.GetJSON[armauthorization.RoleDefinitionsClientGetByIDResponse](
+			ctx, opts.Session, roleDefinitionId,
+			sessions.WithPrefix(containerRoleDefPrefix),
+		)
+		if err == nil && found {
+			return cached, nil
+		}
 	}
-
 	roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
 	if err != nil {
 		return armauthorization.RoleDefinitionsClientGetByIDResponse{}, fmt.Errorf("failed to get role definition: %w", err)
 	}
-
-	usr.roleCacheMutex.Lock()
-	usr.roleCache[roleDefinitionId] = roleDefinition
-	usr.roleCacheMutex.Unlock()
-
+	if opts.Session != nil {
+		_ = session.SetJSON(ctx, opts.Session, roleDefinitionId, roleDefinition, sessions.WithPrefix(containerRoleDefPrefix))
+	}
 	return roleDefinition, nil
 }
 
@@ -211,7 +220,7 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 	state := bag.Pop()
 
 	roleDefinitionId := StringValue(state)
-	roleDefinition, err := usr.getRoleDefinition(ctx, roleDefinitionId)
+	roleDefinition, err := usr.getRoleDefinition(ctx, opts, roleDefinitionId)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -255,8 +264,7 @@ func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 
 func newContainerBuilder(conn *Connector) *containerBuilder {
 	return &containerBuilder{
-		conn:      conn,
-		client:    conn.client,
-		roleCache: make(map[string]armauthorization.RoleDefinitionsClientGetByIDResponse),
+		conn:   conn,
+		client: conn.client,
 	}
 }

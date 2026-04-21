@@ -9,24 +9,26 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/session"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 )
 
-type roleAssignmentCacheValue struct {
-	usedRole        map[string]struct{}
-	rolesAssignment []*armauthorization.RoleAssignment
-}
+// roleAssignmentsPrefix is the session-store key prefix for the cached
+// per-subscription role-assignment list. The value is the raw
+// []*armauthorization.RoleAssignment page from ARM; callers that need a
+// fast "is this role in use" lookup rebuild the roleID set on read (see
+// rolesInUse).
+const roleAssignmentsPrefix = "azinfra-role-assignments-by-sub:"
+
 type roleBuilder struct {
 	conn                  *Connector
 	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
-	// cache for role assignments
-	// subscriptionID -> roleAssignmentCacheValue
-	cache *GenericCache[*roleAssignmentCacheValue]
 }
 
 func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -39,6 +41,11 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	}
 	var rv []*v2.Resource
 	subscriptionID := parentResourceID.Resource
+
+	// Compute the used-role set lazily if SkipUnusedRoles is on. Rebuilt from
+	// the session-store cache, which is populated once per sync on first
+	// call via roleAssignments().
+	var usedRoles map[string]struct{}
 
 	scope := fmt.Sprintf("/subscriptions/%s", subscriptionID)
 	// Get the list of role definitions
@@ -56,14 +63,14 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 					continue
 				}
 
-				err := r.cacheRoleAssignments(ctx, subscriptionID)
-				if err != nil {
-					return nil, nil, err
+				if usedRoles == nil {
+					assignments, err := r.roleAssignments(ctx, opts, subscriptionID)
+					if err != nil {
+						return nil, nil, err
+					}
+					usedRoles = rolesInUse(assignments)
 				}
-				// omit ok since we know the key exists
-				assignments, _ := r.cache.Get(subscriptionID)
-				_, ok := assignments.usedRole[*role.ID]
-				if !ok {
+				if _, ok := usedRoles[*role.ID]; !ok {
 					// not in use, should be skipped
 					continue
 				}
@@ -116,13 +123,12 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs
 		roleID = arr[0]
 	}
 
-	err := r.cacheRoleAssignments(ctx, subscriptionID)
+	assignments, err := r.roleAssignments(ctx, opts, subscriptionID)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	assignments, _ := r.cache.Get(subscriptionID)
-	for _, assignment := range assignments.rolesAssignment {
+	for _, assignment := range assignments {
 		roleDefinitionID := subscriptionRoleId(subscriptionID, roleID)
 		if roleDefinitionID != *assignment.Properties.RoleDefinitionID {
 			continue
@@ -286,48 +292,45 @@ func newRoleBuilder(c *Connector) *roleBuilder {
 	return &roleBuilder{
 		conn:                  c,
 		roleDefinitionsClient: c.roleDefinitionsClient,
-		cache:                 NewGenericCache[*roleAssignmentCacheValue](),
 	}
 }
 
-func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID string) error {
-	l := ctxzap.Extract(ctx)
-
-	if _, ok := r.cache.Get(subscriptionID); ok {
-		return nil
+// roleAssignments returns the per-subscription role-assignment list,
+// consulting the session-store cache first. On miss it walks
+// armauthorization's NewListForSubscriptionPager to exhaustion and
+// populates the cache. Containers that die between runs don't re-fetch
+// on the next sync; opts.Session being nil (test harness) degrades to
+// a live ARM walk without caching.
+func (r *roleBuilder) roleAssignments(ctx context.Context, opts rs.SyncOpAttrs, subscriptionID string) ([]*armauthorization.RoleAssignment, error) {
+	if opts.Session != nil {
+		if cached, found, err := session.GetJSON[[]*armauthorization.RoleAssignment](ctx, opts.Session, subscriptionID, sessions.WithPrefix(roleAssignmentsPrefix)); err == nil && found {
+			return cached, nil
+		}
 	}
 
+	l := ctxzap.Extract(ctx)
 	l.Info(
 		"baton-azure-infrastructure: caching role assignments",
 		zap.String("subscription_id", subscriptionID),
 	)
-
 	start := time.Now()
 
-	// Create a Role Assignments Client
 	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.conn.token, r.conn.client.ArmOptions())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Iterate over all role assignments. armauthorization v2 renamed
 	// NewListPager → NewListForSubscriptionPager (the subscription-id comes
 	// from the client constructor); the returned pager semantics are
 	// unchanged.
+	var all []*armauthorization.RoleAssignment
 	pagerRoles := roleAssignmentsClient.NewListForSubscriptionPager(nil)
 	for pagerRoles.More() {
 		page, err := pagerRoles.NextPage(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
-
-		assignments, _ := r.cache.GetOrSet(subscriptionID, func() (*roleAssignmentCacheValue, error) {
-			value := &roleAssignmentCacheValue{
-				usedRole:        make(map[string]struct{}),
-				rolesAssignment: make([]*armauthorization.RoleAssignment, 0),
-			}
-			return value, nil
-		})
 
 		for _, assignment := range page.Value {
 			// Original guard was `Properties == nil && RoleDefinitionID != nil`,
@@ -339,19 +342,34 @@ func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID s
 				l.Warn("baton-azure-infrastructure: role assignment properties or role definition id are nil")
 				continue
 			}
-
-			assignments.usedRole[*assignment.Properties.RoleDefinitionID] = struct{}{}
-			assignments.rolesAssignment = append(assignments.rolesAssignment, assignment)
+			all = append(all, assignment)
 		}
+	}
 
-		r.cache.Set(subscriptionID, assignments)
+	if opts.Session != nil {
+		_ = session.SetJSON(ctx, opts.Session, subscriptionID, all, sessions.WithPrefix(roleAssignmentsPrefix))
 	}
 
 	l.Info(
 		"baton-azure-infrastructure: role assignments cached successfully",
 		zap.String("subscription_id", subscriptionID),
 		zap.Duration("duration", time.Since(start)),
+		zap.Int("count", len(all)),
 	)
 
-	return nil
+	return all, nil
+}
+
+// rolesInUse returns the set of role-definition IDs referenced by at
+// least one assignment in the list. Cheap to rebuild — O(N) over the
+// slice. Cheaper than persisting the set separately in the session store.
+func rolesInUse(assignments []*armauthorization.RoleAssignment) map[string]struct{} {
+	used := make(map[string]struct{}, len(assignments))
+	for _, a := range assignments {
+		if a == nil || a.Properties == nil || a.Properties.RoleDefinitionID == nil {
+			continue
+		}
+		used[*a.Properties.RoleDefinitionID] = struct{}{}
+	}
+	return used
 }
