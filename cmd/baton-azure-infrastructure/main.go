@@ -20,7 +20,7 @@ var version = "dev"
 func main() {
 	ctx := context.Background()
 	_, cmd, err := config.DefineConfiguration(ctx, "baton-azure-infrastructure", getConnector, cfg.Config,
-		connectorrunner.WithDefaultCapabilitiesConnectorBuilder(&connector.Connector{}),
+		connectorrunner.WithDefaultCapabilitiesConnectorBuilderV2(&connector.Connector{}),
 	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())

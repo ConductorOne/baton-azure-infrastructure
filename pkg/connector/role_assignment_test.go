@@ -11,6 +11,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -584,15 +585,19 @@ func TestFinishPageEmptyBagYieldsEmptyToken(t *testing.T) {
 	bag.Push(raBagState{Phase: raPhaseSub, CurrentSub: "x"})
 	_ = bag.Pop()
 
-	resources, tok, anns, err := finishPage(bag, nil)
+	resources, res, err := finishPage(bag, nil)
 	if err != nil {
 		t.Fatalf("finishPage: %v", err)
 	}
-	if anns != nil {
-		t.Errorf("expected nil annotations, got %v", anns)
+	if res != nil && res.Annotations != nil {
+		t.Errorf("expected nil annotations, got %v", res.Annotations)
 	}
 	if len(resources) != 0 {
 		t.Errorf("expected no resources, got %d", len(resources))
+	}
+	tok := ""
+	if res != nil {
+		tok = res.NextPageToken
 	}
 	if tok != "" {
 		t.Errorf("expected empty token for drained bag, got %q", tok)
@@ -610,13 +615,14 @@ func TestFinishPageNonEmptyBagYieldsSerializedState(t *testing.T) {
 		PendingSubs: []string{"sub-b", "sub-c"},
 	})
 
-	_, tok, _, err := finishPage(bag, nil)
+	_, res, err := finishPage(bag, nil)
 	if err != nil {
 		t.Fatalf("finishPage: %v", err)
 	}
-	if tok == "" {
+	if res == nil || res.NextPageToken == "" {
 		t.Fatalf("expected non-empty token, got empty")
 	}
+	tok := res.NextPageToken
 
 	restored, err := pagination.GenBagFromToken[raBagState](&pagination.Token{Token: tok})
 	if err != nil {
@@ -639,7 +645,7 @@ func TestListUnknownPhaseReturnsError(t *testing.T) {
 		t.Fatalf("Marshal: %v", err)
 	}
 	b := &roleAssignmentBuilder{}
-	_, _, _, err = b.List(context.Background(), nil, &pagination.Token{Token: tok})
+	_, _, err = b.List(context.Background(), nil, rs.SyncOpAttrs{PageToken: pagination.Token{Token: tok}})
 	if err == nil {
 		t.Fatalf("expected error on unknown phase, got nil")
 	}
@@ -800,7 +806,7 @@ func TestListFirstCallAcceptsEmptyToken(t *testing.T) {
 			return
 		}
 	}()
-	_, _, _, err := b.List(context.Background(), nil, &pagination.Token{Token: ""})
+	_, _, err := b.List(context.Background(), nil, rs.SyncOpAttrs{PageToken: pagination.Token{Token: ""}})
 	// If no panic, we must at least have a non-pagination error.
 	if err != nil && contains(err.Error(), "pagination") {
 		t.Errorf("empty token should be accepted by pagination layer; got %v", err)
@@ -840,14 +846,14 @@ func TestListSubPage_PreservesSeenSetAcrossSubTransition(t *testing.T) {
 	bag := &pagination.GenBag[raBagState]{}
 	b := &roleAssignmentBuilder{}
 
-	emitted, tok, _, err := b.listSubPage(context.Background(), zap.NewNop(), bag, state)
+	emitted, res, err := b.listSubPage(context.Background(), zap.NewNop(), bag, state)
 	if err != nil {
 		t.Fatalf("listSubPage: %v", err)
 	}
 	if len(emitted) != 0 {
 		t.Errorf("expected no resources emitted when CurrentSub empty, got %d", len(emitted))
 	}
-	if tok == "" {
+	if res == nil || res.NextPageToken == "" {
 		t.Fatalf("expected non-empty token — bag should still have pending subs to process")
 	}
 

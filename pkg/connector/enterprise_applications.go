@@ -18,6 +18,7 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 )
@@ -41,17 +42,17 @@ func (e *enterpriseApplicationsBuilder) ResourceType(ctx context.Context) *v2.Re
 	return enterpriseApplicationResourceType
 }
 
-func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
+func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
+	bag, err := parsePageToken(opts.PageToken.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	reqURL := bag.PageToken()
 
 	resp, err := e.client.ListServicePrincipals(ctx, reqURL)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	var applicationsOwned []*client.ServicePrincipal
@@ -68,7 +69,7 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 	for i, app := range applicationsOwned {
 		value, err := enterpriseApplicationResource(ctx, app, parentResourceID)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		resources[i] = value
@@ -76,13 +77,13 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 
 	pageToken, err := bag.NextToken(resp.NextLink)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
-	return resources, pageToken, nil, nil
+	return resources, &rs.SyncOpResults{NextPageToken: pageToken}, nil
 }
 
-func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	var err error
 
 	// https://learn.microsoft.com/en-us/graph/api/resources/approleassignment?view=graph-rest-1.0
@@ -95,7 +96,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 		ownersEntIdString, err := ownersEntId.MarshalString()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		ent := entitlement.NewPermissionEntitlement(
@@ -125,7 +126,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 		defaultAppRoleAssignmentStringerString, err := defaultAppRoleAssignmentStringer.MarshalString()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		ent := entitlement.NewAssignmentEntitlement(
@@ -145,7 +146,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 	})
 
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: failed to get service principal on cache: %w", err)
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: failed to get service principal on cache: %w", err)
 	}
 
 	for _, appRole := range servicePrincipal.AppRoles {
@@ -165,7 +166,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 		appRoleAssignmentIdString, err := appRoleAssignmentId.MarshalString()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		ent := entitlement.NewAssignmentEntitlement(
@@ -180,16 +181,16 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 		rv = append(rv, ent)
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
-func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 
 	b := &pagination.Bag{}
-	err := b.Unmarshal(pt.Token)
+	err := b.Unmarshal(opts.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	// AzureId relarted to Azure resource
@@ -222,7 +223,7 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 			return e.client.ServicePrincipal(ctx, principalId)
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		resp := principalResp.AppRolesAssignedTo
@@ -262,16 +263,16 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 			), nil
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		b.Pop()
 		nextToken, err := b.Marshal()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
-		return grants, nextToken, nil, err
+		return grants, &rs.SyncOpResults{NextPageToken: nextToken}, err
 	case ownersStr:
 		resp, err := e.client.ServicePrincipalOwners(ctx, principalId)
 		if err != nil {
@@ -282,10 +283,10 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 					zap.String("url", ps.Token),
 					zap.Error(err),
 				)
-				return nil, "", nil, nil
+				return nil, nil, nil
 			}
 
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		grants, err := ConvertErr(resp.Members, func(gm *client.Membership) (*v2.Grant, error) {
@@ -323,17 +324,17 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 			), nil
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		pageToken, err := b.NextToken(resp.NextLink)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
-		return grants, pageToken, nil, nil
+		return grants, &rs.SyncOpResults{NextPageToken: pageToken}, nil
 	default:
-		return nil, "", nil, fmt.Errorf("unknown resource type: %s", ps.ResourceTypeID)
+		return nil, nil, fmt.Errorf("unknown resource type: %s", ps.ResourceTypeID)
 	}
 }
 
