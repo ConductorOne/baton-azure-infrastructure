@@ -314,78 +314,15 @@ func getEntitlementForTesting(resource *v2.Resource, resourceDisplayName, entitl
 	return ent.NewAssignmentEntitlement(resource, entitlement, options...)
 }
 
-func TestRoleGrant(t *testing.T) {
-	var roleEntitlement string
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.NoError(t, err)
-
-	// ________________________________________________________________
-	// | resource-name | resource-id | subscription-id | entitlement |
-	// ----------------------------------------------------------------
-	// role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned
-	grantEntitlement := "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned"
-	grantPrincipalType := "user"
-	grantPrincipal := grantPrincipalForTestingV2
-	_, grantEntitlementIDs, err := parseEntitlementID(grantEntitlement)
-	require.NoError(t, err)
-	require.NotNil(t, grantEntitlementIDs)
-
-	roleEntitlement = grantEntitlementIDs[3]
-	resource, err := getRoleForTesting(ctxTest,
-		grantEntitlementIDs[2],
-		grantEntitlementIDs[1],
-		"AcrDelete",
-		"testing role",
-	)
-	require.NoError(t, err)
-
-	entitlement := getEntitlementForTesting(resource, grantPrincipalType, roleEntitlement)
-	g := newRoleBuilder(connTest)
-	_, err = g.Grant(ctxTest, &v2.Resource{
-		Id: &v2.ResourceId{
-			ResourceType: userResourceType.Id,
-			Resource:     grantPrincipal,
-		},
-	}, entitlement)
-	require.NoError(t, err)
-}
-
-func TestRoleRevoke(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.NoError(t, err)
-
-	// ________________________________________________________________________________________________
-	// | resource-name | resource-id | subscription-id | entitlement | principal-type | principal-id |
-	// ------------------------------------------------------------------------------------------------
-	// role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:e7f6b650-1cd5-4859-a258-1de497c29de3
-	revokeGrant := "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:e7f6b650-1cd5-4859-a258-1de497c29de3"
-	revokeGrantIDs := strings.Split(revokeGrant, ":")
-	principalID := &v2.ResourceId{ResourceType: userResourceType.Id, Resource: revokeGrantIDs[5]}
-	resource, err := getRoleForTesting(ctxTest,
-		revokeGrantIDs[2],
-		revokeGrantIDs[1],
-		"AcrDelete",
-		"testing role",
-	)
-	require.NoError(t, err)
-
-	gr := grant.NewGrant(resource, typeAssigned, principalID)
-	annos := annotations.Annotations(gr.Annotations)
-	gr.Annotations = annos
-	require.NotNil(t, gr)
-
-	l := newRoleBuilder(connTest)
-	_, err = l.Revoke(ctxTest, gr)
-	require.NoError(t, err)
-}
+// TestRoleGrant and TestRoleRevoke (previously at this point in the file)
+// were removed as part of the sparse-ACL completion (PR #83 / #84 follow-up).
+// The role builder's Grant and Revoke methods were deleted; provisioning
+// now flows exclusively through the role_assignment builder.
+//
+// Coverage for the provisioning path is in role_assignment_live_test.go
+// (TestLiveGrantRevoke), which exercises Grant / duplicate Grant / Revoke /
+// missing Revoke end-to-end against a live Azure tenant and verifies the
+// idempotency annotations (GrantAlreadyExists, GrantAlreadyRevoked).
 
 func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {

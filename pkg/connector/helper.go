@@ -495,15 +495,27 @@ func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, pa
 	return resource, nil
 }
 
+// getRoleId returns the bare role definition UUID for use as a c1 resource
+// ID. The input is an ARM role definition path like
+// "/subscriptions/<sub>/providers/Microsoft.Authorization/roleDefinitions/<uuid>"
+// or "/providers/Microsoft.Authorization/roleDefinitions/<uuid>" for tenant-
+// root roles.
+//
+// BREAKING (post-PR-83): previously returned "<uuid>:<subscriptionID>" to
+// carry scope context in the resource identity. Dropped in favor of tenant-
+// global bare UUID since roles are tenant-global in Azure and scope lives
+// on role_assignment resources via ScopeBindingTrait. Callers that were
+// parsing the trailing ":<sub>" to recover the subscription must instead
+// consult the role_assignment's ScopeBindingTrait.scope_resource_id.
 func getRoleId(roleID *string) string {
-	if strings.Contains(StringValue(roleID), "/") {
-		arr := strings.Split(StringValue(roleID), "/")
-		if len(arr) > 0 {
-			return arr[len(arr)-1] + ":" + arr[2] // roleID + subscriptionID
-		}
+	s := StringValue(roleID)
+	if s == "" {
+		return ""
 	}
-
-	return ""
+	if idx := strings.LastIndex(s, "/"); idx >= 0 && idx < len(s)-1 {
+		return s[idx+1:]
+	}
+	return s
 }
 
 func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (string, error) {
@@ -912,55 +924,14 @@ func roleIdFromRoleDefinitionId(roleDefinitionId string) (string, error) {
 	return splitValues[len(splitValues)-1], nil
 }
 
-func grantFromRoleAssigment(
-	resource *v2.Resource,
-	entitlementName string,
-	subscriptionID string,
-	in *armauthorization.RoleAssignment,
-) (*v2.Grant, error) {
-	if in.Properties.RoleDefinitionID == nil {
-		return nil, fmt.Errorf("role definition id is nil")
-	}
-
-	roleIdFromSplit, err := roleIdFromRoleDefinitionId(*in.Properties.RoleDefinitionID)
-	if err != nil {
-		return nil, err
-	}
-
-	// roleID : subscriptionID
-	roleId, err := rs.NewResourceID(
-		roleResourceType,
-		fmt.Sprintf("%s:%s", roleIdFromSplit, subscriptionID),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return grantFromRole(resource, entitlementName, roleId)
-}
-
-func grantFromRole(
-	resource *v2.Resource,
-	entitlementName string,
-	roleId *v2.ResourceId,
-) (*v2.Grant, error) {
-	var grantOpts []grant.GrantOption
-	// TODO: review this grant Expandable operation
-	grantOpts = append(grantOpts, grant.WithAnnotation(&v2.GrantExpandable{
-		EntitlementIds: []string{
-			fmt.Sprintf("role:%s:owners", roleId.Resource),
-			fmt.Sprintf("role:%s:assigned", roleId.Resource),
-		},
-		Shallow: true,
-	}))
-
-	return grant.NewGrant(
-		resource,
-		entitlementName,
-		roleId,
-		grantOpts...,
-	), nil
-}
+// grantFromRole and grantFromRoleAssigment were removed as part of the
+// sparse-ACL completion (PR #83). They emitted grants on action entitlements
+// of storage_account / container / resource_group with a role resource as
+// principal and a GrantExpandable annotation pointing at per-role Owner /
+// Member entitlements. Post-sparse-ACL those per-role entitlements no longer
+// exist and the expansion has nothing to expand from — the grants were dead
+// projections of information already carried by role_assignment resources
+// with ScopeBindingTrait. See role_assignment.go for the authoritative path.
 
 func grantFromEligibleAssignment(ctx context.Context, resource *v2.Resource, assigment client.PMIRoleAssigment) (*v2.Grant, error) {
 	l := ctxzap.Extract(ctx)

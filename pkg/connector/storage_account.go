@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -136,53 +135,21 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 		return nil, nil, err
 	}
 
+	// First invocation: the classic RBAC role-assignment emission at
+	// storage-account scope used to happen here. It emitted a grant on the
+	// storage account's "assignment" entitlement with the role resource as
+	// principal, plus per-action grants through GrantExpandable. Both are
+	// redundant with role_assignment resources carrying ScopeBindingTrait —
+	// see role_assignment.go. Post-sparse-ACL we skip straight to the PMI
+	// (eligible assignment) branch, which is genuinely separate coverage.
 	if bag.Current() == nil {
-		bag.Push(bagState{
-			Value: "",
-			State: "ELIGIBLE",
-		})
-
-		roleClient, err := armauthorization.NewRoleAssignmentsClient(
-			storageResourceIDs.subscriptionID,
-			usr.conn.token,
-			usr.conn.client.ArmOptions(),
-		)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		var grants []*v2.Grant
-
-		rolesAssignments := roleClient.NewListForScopePager(storageResourceIDs.AzureId(), nil)
-
-		for rolesAssignments.More() {
-			result, err := rolesAssignments.NextPage(ctx)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			convertErr, err := ConvertErr(result.Value, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
-				bag.Push(bagState{
-					Value: StringValue(in.Properties.RoleDefinitionID),
-					State: "ASSIGNMENT",
-				})
-
-				return grantFromRoleAssigment(resource, "assignment", storageResourceIDs.subscriptionID, in)
-			})
-
-			if err != nil {
-				return nil, nil, err
-			}
-
-			grants = append(grants, convertErr...)
-		}
+		bag.Push(bagState{Value: "", State: "ELIGIBLE"})
 
 		nextToken, err := bag.Marshal()
 		if err != nil {
 			return nil, nil, err
 		}
-
-		return grants, &rs.SyncOpResults{NextPageToken: nextToken}, nil
+		return nil, &rs.SyncOpResults{NextPageToken: nextToken}, nil
 	}
 
 	// Get the current state
@@ -191,42 +158,6 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 	var grants []*v2.Grant
 
 	switch state.State {
-	case "ASSIGNMENT":
-		roleDefinitionId := state.Value
-		roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
-
-		if err != nil {
-			return nil, nil, err
-		}
-
-		actions, err := rolemapper.StorageAccountPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		for _, action := range actions {
-			plainRoleId, err := roleIdFromRoleDefinitionId(roleDefinitionId)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			roleResourceId, err := rs.NewResourceID(
-				roleResourceType,
-				fmt.Sprintf("%s:%s", plainRoleId, storageResourceIDs.subscriptionID),
-			)
-
-			if err != nil {
-				return nil, nil, err
-			}
-
-			newGrant, err := grantFromRole(resource, action, roleResourceId)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			grants = append(grants, newGrant)
-		}
-
 	case "ELIGIBLE":
 		if usr.conn.skipEntraIDP2LicenseFeatures {
 			l.Debug("skipping privileged access grants on storage accounts.")

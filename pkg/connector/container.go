@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/session"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
@@ -162,104 +160,16 @@ func (usr *containerBuilder) getRoleDefinition(ctx context.Context, opts rs.Sync
 	return roleDefinition, nil
 }
 
-// Grants always returns an empty slice for users since they don't have any entitlements.
-func (usr *containerBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
-	if resource.ParentResourceId == nil || resource.ParentResourceId.ResourceType != storageAccountResourceType.Id {
-		return nil, nil, fmt.Errorf("container resource must have a parent resource from type %s", storageAccountResourceType.Id)
-	}
-
-	// RoleDefinitionsIds
-	bag := pagination.GenBag[string]{}
-
-	err := bag.Unmarshal(opts.PageToken.Token)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	parsedParentId, err := newStorageResourceSplitIdDataFromConnectorId(resource.ParentResourceId.Resource)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if bag.Current() == nil {
-		idSplit := strings.Split(resource.Id.Resource, ":")
-		if len(idSplit) != 2 {
-			return nil, nil, fmt.Errorf("invalid resource id: %s", resource.Id.Resource)
-		}
-
-		containerName := idSplit[1]
-
-		scope := fmt.Sprintf("%s/blobServices/default/containers/%s", parsedParentId.AzureId(), containerName)
-		assignments, err := usr.client.GetRoleAssignments(ctx, parsedParentId.subscriptionID, scope)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		grants, err := ConvertErr(assignments, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
-			bag.Push(StringValue(in.Properties.RoleDefinitionID))
-
-			return grantFromRoleAssigment(
-				resource,
-				"assignment",
-				parsedParentId.subscriptionID,
-				in,
-			)
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-
-		nextToken, err := bag.Marshal()
-		if err != nil {
-			return nil, nil, err
-		}
-
-		return grants, &rs.SyncOpResults{NextPageToken: nextToken}, nil
-	}
-
-	state := bag.Pop()
-
-	roleDefinitionId := StringValue(state)
-	roleDefinition, err := usr.getRoleDefinition(ctx, opts, roleDefinitionId)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	actions, err := rolemapper.ContainerPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var grants []*v2.Grant
-	for _, action := range actions {
-		plainRoleId, err := roleIdFromRoleDefinitionId(roleDefinitionId)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		roleResourceId, err := rs.NewResourceID(
-			roleResourceType,
-			fmt.Sprintf("%s:%s", plainRoleId, parsedParentId.subscriptionID),
-		)
-
-		if err != nil {
-			return nil, nil, err
-		}
-
-		newGrant, err := grantFromRole(resource, action, roleResourceId)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		grants = append(grants, newGrant)
-	}
-
-	nextToken, err := bag.Marshal()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return grants, &rs.SyncOpResults{NextPageToken: nextToken}, nil
+// Grants returns no grants. Access to containers is authoritatively
+// expressed by role_assignment resources with ScopeBindingTrait whose
+// scope_resource_id references either the container itself or an ancestor
+// scope (storage account / resource group / subscription / management
+// group). The pre-sparse-ACL implementation emitted grants on container
+// action entitlements with role resources as principal and GrantExpandable
+// annotations — dead projections now that per-role entitlements are gone.
+// See role_assignment.go for the authoritative path.
+func (usr *containerBuilder) Grants(_ context.Context, _ *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 func newContainerBuilder(conn *Connector) *containerBuilder {
