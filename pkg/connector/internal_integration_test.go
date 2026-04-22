@@ -23,14 +23,13 @@ import (
 )
 
 var (
-	azureClientId              = os.Getenv("BATON_AZURE_CLIENT_ID")
-	azureClientSecret          = os.Getenv("BATON_AZURE_CLIENT_SECRET")
-	azureTenantId              = os.Getenv("BATON_AZURE_TENANT_ID")
-	ctxTest                    = context.Background()
-	grantPrincipalForTesting   = "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
-	grantPrincipalForTestingV2 = "e7f6b650-1cd5-4859-a258-1de497c29de3"
-	roleForTesting             = "11102f94-c441-49e6-a78b-ef80e0188abc"
-	subscriptionIDForTesting   = "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
+	azureClientId            = os.Getenv("BATON_AZURE_CLIENT_ID")
+	azureClientSecret        = os.Getenv("BATON_AZURE_CLIENT_SECRET")
+	azureTenantId            = os.Getenv("BATON_AZURE_TENANT_ID")
+	ctxTest                  = context.Background()
+	grantPrincipalForTesting = "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+	roleForTesting           = "11102f94-c441-49e6-a78b-ef80e0188abc"
+	subscriptionIDForTesting = "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
 )
 
 func NewTestConnector(t *testing.T) (context.Context, *Connector) {
@@ -251,21 +250,6 @@ func TestSubscriptionGrants(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func parseEntitlementID(id string) (*v2.ResourceId, []string, error) {
-	parts := strings.Split(id, ":")
-	// Need to be at least 3 parts type:entitlement_id:slug
-	if len(parts) < 4 || len(parts) > 4 {
-		return nil, nil, fmt.Errorf("azure-infrastructure-connector: invalid resource id")
-	}
-
-	resourceId := &v2.ResourceId{
-		ResourceType: parts[0],
-		Resource:     strings.Join(parts[1:len(parts)-1], ":"),
-	}
-
-	return resourceId, parts, nil
-}
-
 func parseRoleAssignmentEntitlementID(id string) (*v2.ResourceId, []string, error) {
 	parts := strings.Split(id, ":")
 	// Need to be at least 3 parts type:entitlement_id:slug
@@ -279,18 +263,6 @@ func parseRoleAssignmentEntitlementID(id string) (*v2.ResourceId, []string, erro
 	}
 
 	return resourceId, parts, nil
-}
-
-func getRoleForTesting(ctxTest context.Context, subscriptionId, roleId, name, description string) (*v2.Resource, error) {
-	strRoleId := subscriptionRoleId(subscriptionId, roleId)
-	return roleResource(ctxTest, &armauthorization.RoleDefinition{
-		ID:   &strRoleId,
-		Name: &name,
-		Properties: &armauthorization.RoleDefinitionProperties{
-			RoleName:    &name,
-			Description: &description,
-		},
-	}, nil)
 }
 
 func getRoleAssignmentResourceGroupForTesting(ctxTest context.Context, subscriptionId, roleId, resourceGroupName, description string) (*v2.Resource, error) {

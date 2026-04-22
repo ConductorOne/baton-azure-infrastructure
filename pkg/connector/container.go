@@ -4,25 +4,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
-
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/session"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
-	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 )
-
-// containerRoleDefPrefix is the session-store key prefix for the
-// container-builder's role-definition lookup cache. Deduplicates the
-// per-container-scope role-definition Graph calls so a customer with
-// thousands of containers referencing the same handful of role
-// definitions only pays for N unique lookups.
-const containerRoleDefPrefix = "azinfra-container-role-def:"
 
 // containerBuilder syncs Container given an StorageAccount.
 type containerBuilder struct {
@@ -140,26 +129,6 @@ func (usr *containerBuilder) Entitlements(_ context.Context, resource *v2.Resour
 // session-store cache first and falling through to a live Graph lookup on
 // miss. opts.Session may be nil in test harnesses; in that case we always
 // hit Graph.
-func (usr *containerBuilder) getRoleDefinition(ctx context.Context, opts rs.SyncOpAttrs, roleDefinitionId string) (armauthorization.RoleDefinitionsClientGetByIDResponse, error) {
-	if opts.Session != nil {
-		cached, found, err := session.GetJSON[armauthorization.RoleDefinitionsClientGetByIDResponse](
-			ctx, opts.Session, roleDefinitionId,
-			sessions.WithPrefix(containerRoleDefPrefix),
-		)
-		if err == nil && found {
-			return cached, nil
-		}
-	}
-	roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
-	if err != nil {
-		return armauthorization.RoleDefinitionsClientGetByIDResponse{}, fmt.Errorf("failed to get role definition: %w", err)
-	}
-	if opts.Session != nil {
-		_ = session.SetJSON(ctx, opts.Session, roleDefinitionId, roleDefinition, sessions.WithPrefix(containerRoleDefPrefix))
-	}
-	return roleDefinition, nil
-}
-
 // Grants returns no grants. Access to containers is authoritatively
 // expressed by role_assignment resources with ScopeBindingTrait whose
 // scope_resource_id references either the container itself or an ancestor

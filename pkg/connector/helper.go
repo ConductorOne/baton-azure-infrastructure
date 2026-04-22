@@ -916,14 +916,6 @@ func storageAccountResource(ctx context.Context, account *armstorage.Account, pa
 	)
 }
 
-func roleIdFromRoleDefinitionId(roleDefinitionId string) (string, error) {
-	splitValues := strings.Split(roleDefinitionId, "/")
-	if len(splitValues) != 7 {
-		return "", fmt.Errorf("invalid role definition id %s", roleDefinitionId)
-	}
-	return splitValues[len(splitValues)-1], nil
-}
-
 // grantFromRole and grantFromRoleAssigment were removed as part of the
 // sparse-ACL completion (PR #83). They emitted grants on action entitlements
 // of storage_account / container / resource_group with a role resource as

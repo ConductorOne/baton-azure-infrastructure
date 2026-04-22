@@ -830,17 +830,15 @@ func roleAssignmentResource(subscriptionID string, ra *armauthorization.RoleAssi
 	// reconstruct the grant without a second ARM roundtrip.
 	resourceID := fmt.Sprintf("%s@%s", *ra.Name, *props.PrincipalID)
 
-	// role_id points at the role_definition resource. This connector's roleBuilder
-	// (pkg/connector/role.go + helper.go:getRoleId) emits role resources with
-	// composite IDs of the form "<roleUUID>:<subscriptionID>" — not bare UUIDs —
-	// so the ScopeBindingTrait reference has to match that format exactly or c1
-	// cannot resolve the role from the binding. We build the same composite here
-	// using the current subscription context.
+	// role_id points at the role_definition resource. Post-sparse-ACL
+	// restructure, roleBuilder emits role resources with bare-UUID IDs
+	// (tenant-global) — see pkg/connector/role.go and helper.go:getRoleId.
+	// The ScopeBindingTrait reference must match that exact format for c1
+	// to resolve the role from the binding.
 	roleUUID := path.Base(*props.RoleDefinitionID)
-	roleResourceID := fmt.Sprintf("%s:%s", roleUUID, subscriptionID)
 	roleScopeResourceID := &v2.ResourceId{
 		ResourceType: roleResourceType.Id,
-		Resource:     roleResourceID,
+		Resource:     roleUUID,
 	}
 
 	// scope_resource_id must reference a resource ID in the format the matching
