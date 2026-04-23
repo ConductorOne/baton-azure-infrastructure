@@ -520,25 +520,25 @@ func TestScopeResourceRefFromAzureScope(t *testing.T) {
 			wantID:   "0ba3df83-67b5-4a08-a561-e65fa74a1aa0",
 		},
 		{
-			name:     "RG scope → bare RG name",
+			name:     "RG scope → <sub>:<rg> (globally unique — previously bare name, which collided across subs)",
 			scope:    "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0/resourceGroups/rg-apps-web-prd",
 			wantType: resourceGroupResourceType.Id,
-			wantID:   "rg-apps-web-prd",
+			wantID:   "0ba3df83-67b5-4a08-a561-e65fa74a1aa0:rg-apps-web-prd",
 		},
 		{
-			name:     "KV-secret sub-resource scope → parent RG name (follow-up: own resource type)",
+			name:     "KV-secret sub-resource scope → parent RG, composite form (follow-up: own resource type)",
 			scope:    "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0/resourceGroups/rg-apps-api-prd/providers/Microsoft.KeyVault/vaults/kv-apps-api-prd/secrets/portal-db-conn",
 			wantType: resourceGroupResourceType.Id,
-			wantID:   "rg-apps-api-prd",
+			wantID:   "0ba3df83-67b5-4a08-a561-e65fa74a1aa0:rg-apps-api-prd",
 		},
 		{
-			name: "storage-container scope → parent RG name",
+			name: "storage-container scope → parent RG, composite form",
 			scope: "/subscriptions/0ba3df83-67b5-4a08-a561-e65fa74a1aa0" +
 				"/resourceGroups/rg-data-lake-prd" +
 				"/providers/Microsoft.Storage/storageAccounts/stc1labbronze" +
 				"/blobServices/default/containers/raw",
 			wantType: resourceGroupResourceType.Id,
-			wantID:   "rg-data-lake-prd",
+			wantID:   "0ba3df83-67b5-4a08-a561-e65fa74a1aa0:rg-data-lake-prd",
 		},
 		{
 			name:     "mgmt-group scope → full ARM path (matches mgmt_group builder's emission)",

@@ -922,7 +922,9 @@ func scopeResourceRefFromAzureScope(scope string) (string, string) {
 			if j := strings.Index(after, "/"); j >= 0 {
 				rgName = after[:j]
 			}
-			return resourceGroupResourceType.Id, rgName
+			// Match resourceGroupResource's ID format: <subID>:<rgName>.
+			// A bare rgName would collide across subs with the same name.
+			return resourceGroupResourceType.Id, subID + ":" + rgName
 		}
 		return subscriptionsResourceType.Id, subID
 	default:
@@ -979,17 +981,27 @@ func subscriptionFromBindingRoleRef(compositeRoleID string) string {
 
 // armScopeFromBindingRef reconstructs the Azure ARM scope string from a
 // ScopeBindingTrait.scope_resource_id. The binding carries BUILDER-FORMAT ids
-// (bare sub GUID / bare RG name / full ARM path for mgmt-group) rather than
-// ARM scopes, so Grant and Revoke need to rebuild the path before calling
-// Azure. For resource_group the sub is not in the binding; callers pass it
-// in (typically recovered from the role_id composite via
-// subscriptionFromBindingRoleRef).
+// (bare sub GUID / "<sub>:<rgName>" for RG / full ARM path for mgmt-group)
+// rather than ARM scopes, so Grant and Revoke need to rebuild the path
+// before calling Azure. The subscriptionID parameter is the caller's
+// fallback; for the RG case we prefer the sub encoded in the scope_resource_id
+// itself.
 func armScopeFromBindingRef(scopeResourceType, scopeResourceID, subscriptionID string) string {
 	switch scopeResourceType {
 	case subscriptionsResourceType.Id:
 		return "/subscriptions/" + scopeResourceID
 	case resourceGroupResourceType.Id:
-		return fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, scopeResourceID)
+		// New format: "<subID>:<rgName>". Prefer the sub encoded in the
+		// scope_resource_id; fall back to the caller-supplied sub for
+		// backward compatibility with pre-fix bindings that stored just
+		// the bare rg name.
+		subForScope := subscriptionID
+		rgName := scopeResourceID
+		if colon := strings.Index(scopeResourceID, ":"); colon > 0 && colon < len(scopeResourceID)-1 {
+			subForScope = scopeResourceID[:colon]
+			rgName = scopeResourceID[colon+1:]
+		}
+		return fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subForScope, rgName)
 	case managementGroupResourceType.Id:
 		// management_group builder emits the full ARM path as the resource
 		// id, so nothing to reconstruct.

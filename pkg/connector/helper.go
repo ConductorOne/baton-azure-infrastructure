@@ -363,6 +363,23 @@ func getResourceGroupID(name, subscriptionID, roleID string) string {
 }
 
 // https://learn.microsoft.com/es-es/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
+// resourceGroupResource emits a c1 resource for an Azure resource_group.
+//
+// BREAKING (from older azure-infra shape): the c1 resource ID used to be the
+// bare `rg.Name`, which silently collapsed RGs that shared a name across
+// subscriptions. Azure RG names are only unique within a subscription; two
+// subs can each have an `rg-apps-web-prd`, and both are distinct resources.
+// The old ID scheme lost that distinction — one RG row in c1z for both real
+// Azure resources — producing undercounted inventory and ambiguous scope
+// references on role_assignments.
+//
+// New format: "<subscriptionID>:<rgName>". Globally unique, matches the
+// colon-composite convention storage_account already uses. Callers that
+// parse this ID (armScopeFromBindingRef for Grant/Revoke, subscription
+// recovery for scope reconstruction) split on the first ":".
+//
+// parentResourceID must carry the subscription — we read subscriptionID
+// from it rather than requiring a separate parameter.
 func resourceGroupResource(ctx context.Context, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var opts []rs.ResourceOption
 	profile := map[string]interface{}{
@@ -376,11 +393,20 @@ func resourceGroupResource(ctx context.Context, rg *armresources.ResourceGroup, 
 		rs.WithGroupProfile(profile),
 	}
 
+	subscriptionID := ""
+	if parentResourceID != nil {
+		subscriptionID = parentResourceID.Resource
+	}
+	rgID := StringValue(rg.Name)
+	if subscriptionID != "" {
+		rgID = subscriptionID + ":" + StringValue(rg.Name)
+	}
+
 	opts = append(opts, rs.WithGroupTrait(groupListTraitOptions...), rs.WithParentResourceID(parentResourceID))
 	resource, err := rs.NewResource(
 		StringValue(rg.Name),
 		resourceGroupResourceType,
-		StringValue(rg.Name),
+		rgID,
 		opts...,
 	)
 	if err != nil {
