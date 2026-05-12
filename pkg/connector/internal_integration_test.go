@@ -7,27 +7,29 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 
 	"github.com/stretchr/testify/require"
 )
 
 var (
-	azureClientId              = os.Getenv("BATON_AZURE_CLIENT_ID")
-	azureClientSecret          = os.Getenv("BATON_AZURE_CLIENT_SECRET")
-	azureTenantId              = os.Getenv("BATON_AZURE_TENANT_ID")
-	ctxTest                    = context.Background()
-	grantPrincipalForTesting   = "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
-	grantPrincipalForTestingV2 = "e7f6b650-1cd5-4859-a258-1de497c29de3"
-	roleForTesting             = "11102f94-c441-49e6-a78b-ef80e0188abc"
-	subscriptionIDForTesting   = "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
+	azureClientId            = os.Getenv("BATON_AZURE_CLIENT_ID")
+	azureClientSecret        = os.Getenv("BATON_AZURE_CLIENT_SECRET")
+	azureTenantId            = os.Getenv("BATON_AZURE_TENANT_ID")
+	ctxTest                  = context.Background()
+	grantPrincipalForTesting = "72af6288-7040-49ca-a2f0-51ce6ba5a78a"
+	roleForTesting           = "11102f94-c441-49e6-a78b-ef80e0188abc"
+	subscriptionIDForTesting = "39ea64c5-86d5-4c29-8199-5b602c90e1c5"
 )
 
 func NewTestConnector(t *testing.T) (context.Context, *Connector) {
@@ -70,7 +72,7 @@ func TestUserBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	u := newUserBuilder(connTest)
-	res, _, _, err := u.List(ctxTest, nil, &pagination.Token{})
+	res, _, err := u.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 	require.NotNil(t, res)
 }
@@ -84,32 +86,25 @@ func TestGroupBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	u := newGroupBuilder(connTest)
-	res, _, _, err := u.List(ctxTest, nil, &pagination.Token{})
+	res, _, err := u.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 	require.NotNil(t, res)
 }
 
 func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecret, entraClientId string) (*Connector, error) {
-	cb, err := New(
-		ctx,
-		false,
-		entraTenantId,
-		entraClientId,
-		entraClientSecret,
-		false,
-		false,
-		"graph.microsoft.com",
-		false,
-		false,
-		false,
-		false,
-	)
-
+	// Test harness bypasses the config.RunConnector entrypoint and calls
+	// NewConnectorFromToken directly to avoid the full CLI-flag parsing path.
+	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
 	if err != nil {
 		return nil, err
 	}
-
-	return cb, nil
+	cred, err := azidentity.NewClientSecretCredential(entraTenantId, entraClientId, entraClientSecret, &azidentity.ClientSecretCredentialOptions{
+		ClientOptions: azcore.ClientOptions{Transport: httpClient},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return NewConnectorFromToken(ctx, httpClient, cred, false, false, "graph.microsoft.com", false, false, false)
 }
 
 func TestSubscriptionBuilderList(t *testing.T) {
@@ -121,7 +116,7 @@ func TestSubscriptionBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	s := newSubscriptionBuilder(connTest)
-	_, _, _, err = s.List(ctxTest, nil, &pagination.Token{})
+	_, _, err = s.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 
@@ -134,7 +129,7 @@ func TestTenantBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	tn := newTenantBuilder(connTest)
-	_, _, _, err = tn.List(ctxTest, nil, &pagination.Token{})
+	_, _, err = tn.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 
@@ -147,7 +142,7 @@ func TestResourceGroupBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	rg := newResourceGroupBuilder(connTest)
-	_, _, _, err = rg.List(ctxTest, nil, &pagination.Token{})
+	_, _, err = rg.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 
@@ -160,7 +155,7 @@ func TestRoleAssignmentResourceGroupBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	ra := newRoleAssignmentResourceGroupBuilder(connTest)
-	_, _, _, err = ra.List(ctxTest, nil, &pagination.Token{})
+	_, _, err = ra.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 func TestRoleBuilderList(t *testing.T) {
@@ -174,7 +169,7 @@ func TestRoleBuilderList(t *testing.T) {
 	connTest.SkipUnusedRoles = true
 
 	r := newRoleBuilder(connTest)
-	_, _, _, err = r.List(ctxTest, nil, &pagination.Token{})
+	_, _, err = r.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 
@@ -203,7 +198,7 @@ func TestRoleGrants(t *testing.T) {
 		}, nil)
 		require.NoError(t, err)
 
-		_, _, _, err = r.Grants(ctxTest, resource, nil)
+		_, _, err = r.Grants(ctxTest, resource, rs.SyncOpAttrs{})
 		require.NoError(t, err)
 	}
 }
@@ -230,7 +225,7 @@ func TestRoleAssignmentResourceGroupGrants(t *testing.T) {
 			}, nil)
 		require.NoError(t, err)
 
-		_, _, _, err = r.Grants(ctxTest, gr, nil)
+		_, _, err = r.Grants(ctxTest, gr, rs.SyncOpAttrs{})
 		require.NoError(t, err)
 	}
 }
@@ -251,23 +246,8 @@ func TestSubscriptionGrants(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	_, _, _, err = s.Grants(ctxTest, res, &pagination.Token{})
+	_, _, err = s.Grants(ctxTest, res, rs.SyncOpAttrs{})
 	require.NoError(t, err)
-}
-
-func parseEntitlementID(id string) (*v2.ResourceId, []string, error) {
-	parts := strings.Split(id, ":")
-	// Need to be at least 3 parts type:entitlement_id:slug
-	if len(parts) < 4 || len(parts) > 4 {
-		return nil, nil, fmt.Errorf("azure-infrastructure-connector: invalid resource id")
-	}
-
-	resourceId := &v2.ResourceId{
-		ResourceType: parts[0],
-		Resource:     strings.Join(parts[1:len(parts)-1], ":"),
-	}
-
-	return resourceId, parts, nil
 }
 
 func parseRoleAssignmentEntitlementID(id string) (*v2.ResourceId, []string, error) {
@@ -283,18 +263,6 @@ func parseRoleAssignmentEntitlementID(id string) (*v2.ResourceId, []string, erro
 	}
 
 	return resourceId, parts, nil
-}
-
-func getRoleForTesting(ctxTest context.Context, subscriptionId, roleId, name, description string) (*v2.Resource, error) {
-	strRoleId := subscriptionRoleId(subscriptionId, roleId)
-	return roleResource(ctxTest, &armauthorization.RoleDefinition{
-		ID:   &strRoleId,
-		Name: &name,
-		Properties: &armauthorization.RoleDefinitionProperties{
-			RoleName:    &name,
-			Description: &description,
-		},
-	}, nil)
 }
 
 func getRoleAssignmentResourceGroupForTesting(ctxTest context.Context, subscriptionId, roleId, resourceGroupName, description string) (*v2.Resource, error) {
@@ -318,78 +286,15 @@ func getEntitlementForTesting(resource *v2.Resource, resourceDisplayName, entitl
 	return ent.NewAssignmentEntitlement(resource, entitlement, options...)
 }
 
-func TestRoleGrant(t *testing.T) {
-	var roleEntitlement string
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.NoError(t, err)
-
-	// ________________________________________________________________
-	// | resource-name | resource-id | subscription-id | entitlement |
-	// ----------------------------------------------------------------
-	// role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned
-	grantEntitlement := "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned"
-	grantPrincipalType := "user"
-	grantPrincipal := grantPrincipalForTestingV2
-	_, grantEntitlementIDs, err := parseEntitlementID(grantEntitlement)
-	require.NoError(t, err)
-	require.NotNil(t, grantEntitlementIDs)
-
-	roleEntitlement = grantEntitlementIDs[3]
-	resource, err := getRoleForTesting(ctxTest,
-		grantEntitlementIDs[2],
-		grantEntitlementIDs[1],
-		"AcrDelete",
-		"testing role",
-	)
-	require.NoError(t, err)
-
-	entitlement := getEntitlementForTesting(resource, grantPrincipalType, roleEntitlement)
-	g := newRoleBuilder(connTest)
-	_, err = g.Grant(ctxTest, &v2.Resource{
-		Id: &v2.ResourceId{
-			ResourceType: userResourceType.Id,
-			Resource:     grantPrincipal,
-		},
-	}, entitlement)
-	require.NoError(t, err)
-}
-
-func TestRoleRevoke(t *testing.T) {
-	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
-		t.Skip()
-	}
-
-	connTest, err := getConnectorForTesting(ctxTest, azureTenantId, azureClientSecret, azureClientId)
-	require.NoError(t, err)
-
-	// ________________________________________________________________________________________________
-	// | resource-name | resource-id | subscription-id | entitlement | principal-type | principal-id |
-	// ------------------------------------------------------------------------------------------------
-	// role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:e7f6b650-1cd5-4859-a258-1de497c29de3
-	revokeGrant := "role:11102f94-c441-49e6-a78b-ef80e0188abc:39ea64c5-86d5-4c29-8199-5b602c90e1c5:assigned:user:e7f6b650-1cd5-4859-a258-1de497c29de3"
-	revokeGrantIDs := strings.Split(revokeGrant, ":")
-	principalID := &v2.ResourceId{ResourceType: userResourceType.Id, Resource: revokeGrantIDs[5]}
-	resource, err := getRoleForTesting(ctxTest,
-		revokeGrantIDs[2],
-		revokeGrantIDs[1],
-		"AcrDelete",
-		"testing role",
-	)
-	require.NoError(t, err)
-
-	gr := grant.NewGrant(resource, typeAssigned, principalID)
-	annos := annotations.Annotations(gr.Annotations)
-	gr.Annotations = annos
-	require.NotNil(t, gr)
-
-	l := newRoleBuilder(connTest)
-	_, err = l.Revoke(ctxTest, gr)
-	require.NoError(t, err)
-}
+// TestRoleGrant and TestRoleRevoke (previously at this point in the file)
+// were removed as part of the sparse-ACL completion (PR #83 / #84 follow-up).
+// The role builder's Grant and Revoke methods were deleted; provisioning
+// now flows exclusively through the role_assignment builder.
+//
+// Coverage for the provisioning path is in role_assignment_live_test.go
+// (TestLiveGrantRevoke), which exercises Grant / duplicate Grant / Revoke /
+// missing Revoke end-to-end against a live Azure tenant and verifies the
+// idempotency annotations (GrantAlreadyExists, GrantAlreadyRevoked).
 
 func TestRoleAssignmentResourceGroupGrant(t *testing.T) {
 	if azureTenantId == "" && azureClientSecret == "" && azureClientId == "" {
@@ -486,7 +391,7 @@ func TestResourceGroupEntitlements(t *testing.T) {
 			}, nil)
 		require.NoError(t, err)
 
-		_, _, _, err = rg.Entitlements(ctxTest, assignmentResourceGroupResource, nil)
+		_, _, err = rg.Entitlements(ctxTest, assignmentResourceGroupResource, rs.SyncOpAttrs{})
 		require.NoError(t, err)
 	}
 }

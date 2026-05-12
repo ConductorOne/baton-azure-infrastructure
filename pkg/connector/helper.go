@@ -18,7 +18,7 @@ import (
 
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -293,7 +293,13 @@ func getGroupGrantURL(principal *v2.Resource) string {
 }
 
 // https://learn.microsoft.com/es-es/rest/api/subscription/subscriptions/list?view=rest-subscription-2021-10-01&tabs=HTTP
-func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) (*v2.Resource, error) {
+//
+// idx is the optional tenant-hierarchy lookup (from (*Connector).hierarchy).
+// When present, supplies the parentResourceId — the containing management
+// group — so the sparse-ACL tree view renders tenant → mgmt-group → sub as
+// one coherent tree rather than disconnected roots. When empty, the sub is
+// emitted without a parent.
+func subscriptionResource(ctx context.Context, s *armsubscription.Subscription, idx hierarchyIndex) (*v2.Resource, error) {
 	var appTraitOpts []rs.AppTraitOption
 	profile := map[string]interface{}{
 		"subscriptionId": StringValue(s.SubscriptionID),
@@ -302,11 +308,8 @@ func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) 
 	}
 
 	appTraitOpts = append(appTraitOpts, rs.WithAppProfile(profile))
-	return rs.NewAppResource(
-		StringValue(s.DisplayName),
-		subscriptionsResourceType,
-		StringValue(s.SubscriptionID),
-		appTraitOpts,
+
+	opts := []rs.ResourceOption{
 		rs.WithAnnotation(&v2.V1Identifier{
 			Id: StringValue(s.SubscriptionID),
 		}),
@@ -314,7 +317,19 @@ func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) 
 			&v2.ChildResourceType{ResourceTypeId: resourceGroupResourceType.Id},
 			&v2.ChildResourceType{ResourceTypeId: roleResourceType.Id},
 			&v2.ChildResourceType{ResourceTypeId: storageAccountResourceType.Id},
-		))
+		),
+	}
+	if parent := idx[StringValue(s.SubscriptionID)]; parent != nil {
+		opts = append(opts, rs.WithParentResourceID(parent))
+	}
+
+	return rs.NewAppResource(
+		StringValue(s.DisplayName),
+		subscriptionsResourceType,
+		StringValue(s.SubscriptionID),
+		appTraitOpts,
+		opts...,
+	)
 }
 
 // https://learn.microsoft.com/es-es/rest/api/subscription/tenants/list?view=rest-subscription-2021-10-01&tabs=HTTP
@@ -348,6 +363,23 @@ func getResourceGroupID(name, subscriptionID, roleID string) string {
 }
 
 // https://learn.microsoft.com/es-es/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
+// resourceGroupResource emits a c1 resource for an Azure resource_group.
+//
+// BREAKING (from older azure-infra shape): the c1 resource ID used to be the
+// bare `rg.Name`, which silently collapsed RGs that shared a name across
+// subscriptions. Azure RG names are only unique within a subscription; two
+// subs can each have an `rg-apps-web-prd`, and both are distinct resources.
+// The old ID scheme lost that distinction — one RG row in c1z for both real
+// Azure resources — producing undercounted inventory and ambiguous scope
+// references on role_assignments.
+//
+// New format: "<subscriptionID>:<rgName>". Globally unique, matches the
+// colon-composite convention storage_account already uses. Callers that
+// parse this ID (armScopeFromBindingRef for Grant/Revoke, subscription
+// recovery for scope reconstruction) split on the first ":".
+//
+// parentResourceID must carry the subscription — we read subscriptionID
+// from it rather than requiring a separate parameter.
 func resourceGroupResource(ctx context.Context, rg *armresources.ResourceGroup, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var opts []rs.ResourceOption
 	profile := map[string]interface{}{
@@ -361,11 +393,20 @@ func resourceGroupResource(ctx context.Context, rg *armresources.ResourceGroup, 
 		rs.WithGroupProfile(profile),
 	}
 
+	subscriptionID := ""
+	if parentResourceID != nil {
+		subscriptionID = parentResourceID.Resource
+	}
+	rgID := StringValue(rg.Name)
+	if subscriptionID != "" {
+		rgID = subscriptionID + ":" + StringValue(rg.Name)
+	}
+
 	opts = append(opts, rs.WithGroupTrait(groupListTraitOptions...), rs.WithParentResourceID(parentResourceID))
 	resource, err := rs.NewResource(
 		StringValue(rg.Name),
 		resourceGroupResourceType,
-		StringValue(rg.Name),
+		rgID,
 		opts...,
 	)
 	if err != nil {
@@ -480,15 +521,27 @@ func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, pa
 	return resource, nil
 }
 
+// getRoleId returns the bare role definition UUID for use as a c1 resource
+// ID. The input is an ARM role definition path like
+// "/subscriptions/<sub>/providers/Microsoft.Authorization/roleDefinitions/<uuid>"
+// or "/providers/Microsoft.Authorization/roleDefinitions/<uuid>" for tenant-
+// root roles.
+//
+// BREAKING (post-PR-83): previously returned "<uuid>:<subscriptionID>" to
+// carry scope context in the resource identity. Dropped in favor of tenant-
+// global bare UUID since roles are tenant-global in Azure and scope lives
+// on role_assignment resources via ScopeBindingTrait. Callers that were
+// parsing the trailing ":<sub>" to recover the subscription must instead
+// consult the role_assignment's ScopeBindingTrait.scope_resource_id.
 func getRoleId(roleID *string) string {
-	if strings.Contains(StringValue(roleID), "/") {
-		arr := strings.Split(StringValue(roleID), "/")
-		if len(arr) > 0 {
-			return arr[len(arr)-1] + ":" + arr[2] // roleID + subscriptionID
-		}
+	s := StringValue(roleID)
+	if s == "" {
+		return ""
 	}
-
-	return ""
+	if idx := strings.LastIndex(s, "/"); idx >= 0 && idx < len(s)-1 {
+		return s[idx+1:]
+	}
+	return s
 }
 
 func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (string, error) {
@@ -502,9 +555,11 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 			Version(client.V1).
 			BuildUrl(endpoint, principalID)
 
-		err := cn.client.FromPath(ctx, builderUrl, &principalData)
-		if err != nil {
-			return "", err
+		// Try each endpoint in turn. A 404/403 on one endpoint is common (guest
+		// users and cross-tenant SPs miss directoryObjects) — fall through to
+		// the next endpoint instead of aborting the whole lookup.
+		if err := cn.client.FromPath(ctx, builderUrl, &principalData); err != nil {
+			continue
 		}
 
 		if principalType, ok := principalData["@odata.type"].(string); ok {
@@ -514,6 +569,14 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 				if servicePrincipalType, ok := principalData["servicePrincipalType"].(string); ok {
 					return servicePrincipalType, nil
 				}
+				// Defensive fallback when Graph returns a servicePrincipal
+				// object without the servicePrincipalType field. Default to
+				// Application so mapGraphPrincipalTypeToBaton routes it to
+				// enterprise_application rather than dropping the grant.
+				// The caller's negative cache (role_assignment.go) would
+				// otherwise permanently skip this principal for the rest of
+				// the sync — silent data loss.
+				return spTypeApplication, nil
 			default:
 				return principalType, nil
 			}
@@ -645,8 +708,15 @@ func getPrincipalIDResource(principalType string, assignment *armauthorization.R
 			Resource:     *assignment.Properties.PrincipalID,
 		}
 	case "#microsoft.graph.group":
+		// Entra/AD groups (Graph directory groups) are routed to
+		// groupResourceType — NOT resourceGroupResourceType (which is the
+		// Azure ARM "resource group" concept, a completely different thing
+		// that uses bare RG names like "rg-apps-web-prd" as its id). The
+		// earlier mapping produced ~900 dangling principal references per
+		// lab sync because Entra group GUIDs never resolve as Azure RG
+		// names; found during cross-link validation on this PR.
 		principalId = &v2.ResourceId{
-			ResourceType: resourceGroupResourceType.Id,
+			ResourceType: groupResourceType.Id,
 			Resource:     *assignment.Properties.PrincipalID,
 		}
 	case "Application":
@@ -872,63 +942,14 @@ func storageAccountResource(ctx context.Context, account *armstorage.Account, pa
 	)
 }
 
-func roleIdFromRoleDefinitionId(roleDefinitionId string) (string, error) {
-	splitValues := strings.Split(roleDefinitionId, "/")
-	if len(splitValues) != 7 {
-		return "", fmt.Errorf("invalid role definition id %s", roleDefinitionId)
-	}
-	return splitValues[len(splitValues)-1], nil
-}
-
-func grantFromRoleAssigment(
-	resource *v2.Resource,
-	entitlementName string,
-	subscriptionID string,
-	in *armauthorization.RoleAssignment,
-) (*v2.Grant, error) {
-	if in.Properties.RoleDefinitionID == nil {
-		return nil, fmt.Errorf("role definition id is nil")
-	}
-
-	roleIdFromSplit, err := roleIdFromRoleDefinitionId(*in.Properties.RoleDefinitionID)
-	if err != nil {
-		return nil, err
-	}
-
-	// roleID : subscriptionID
-	roleId, err := rs.NewResourceID(
-		roleResourceType,
-		fmt.Sprintf("%s:%s", roleIdFromSplit, subscriptionID),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return grantFromRole(resource, entitlementName, roleId)
-}
-
-func grantFromRole(
-	resource *v2.Resource,
-	entitlementName string,
-	roleId *v2.ResourceId,
-) (*v2.Grant, error) {
-	var grantOpts []grant.GrantOption
-	// TODO: review this grant Expandable operation
-	grantOpts = append(grantOpts, grant.WithAnnotation(&v2.GrantExpandable{
-		EntitlementIds: []string{
-			fmt.Sprintf("role:%s:owners", roleId.Resource),
-			fmt.Sprintf("role:%s:assigned", roleId.Resource),
-		},
-		Shallow: true,
-	}))
-
-	return grant.NewGrant(
-		resource,
-		entitlementName,
-		roleId,
-		grantOpts...,
-	), nil
-}
+// grantFromRole and grantFromRoleAssigment were removed as part of the
+// sparse-ACL completion (PR #83). They emitted grants on action entitlements
+// of storage_account / container / resource_group with a role resource as
+// principal and a GrantExpandable annotation pointing at per-role Owner /
+// Member entitlements. Post-sparse-ACL those per-role entitlements no longer
+// exist and the expansion has nothing to expand from — the grants were dead
+// projections of information already carried by role_assignment resources
+// with ScopeBindingTrait. See role_assignment.go for the authoritative path.
 
 func grantFromEligibleAssignment(ctx context.Context, resource *v2.Resource, assigment client.PMIRoleAssigment) (*v2.Grant, error) {
 	l := ctxzap.Extract(ctx)

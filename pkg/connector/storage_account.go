@@ -10,11 +10,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/rolemapper"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
@@ -32,13 +30,13 @@ func (usr *storageAccountBuilder) ResourceType(ctx context.Context) *v2.Resource
 
 // List returns all the users from the database as resource objects.
 // Users include a UserTrait because they are the 'shape' of a standard user.
-func (usr *storageAccountBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (usr *storageAccountBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	if parentResourceID == nil {
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 
 	if parentResourceID.ResourceType != subscriptionsResourceType.Id {
-		return nil, "", nil, fmt.Errorf("parentResourceID.ResourceType is not supported: %s", parentResourceID.ResourceType)
+		return nil, nil, fmt.Errorf("parentResourceID.ResourceType is not supported: %s", parentResourceID.ResourceType)
 	}
 
 	factory, err := armstorage.NewClientFactory(
@@ -48,7 +46,7 @@ func (usr *storageAccountBuilder) List(ctx context.Context, parentResourceID *v2
 	)
 
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	storageClient := factory.NewAccountsClient()
@@ -60,7 +58,7 @@ func (usr *storageAccountBuilder) List(ctx context.Context, parentResourceID *v2
 	for storageAccounts.More() {
 		response, err := storageAccounts.NextPage(ctx)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		convertErr, err := ConvertErr(response.Value, func(account *armstorage.Account) (*v2.Resource, error) {
@@ -68,17 +66,17 @@ func (usr *storageAccountBuilder) List(ctx context.Context, parentResourceID *v2
 		})
 
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		resources = append(resources, convertErr...)
 	}
 
-	return resources, "", nil, nil
+	return resources, nil, nil
 }
 
 // Entitlements always returns an empty slice for users.
-func (usr *storageAccountBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (usr *storageAccountBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	rv := []*v2.Entitlement{
 		entitlement.NewPermissionEntitlement(
 			resource,
@@ -111,11 +109,11 @@ func (usr *storageAccountBuilder) Entitlements(_ context.Context, resource *v2.R
 		rv = append(rv, ent)
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
 // Grants always returns an empty slice for users since they don't have any entitlements.
-func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
 	type bagState struct {
 		Value    string `json:"value"`
 		State    string `json:"state"`
@@ -127,63 +125,31 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 	// Stores RoleDefinitionIds
 	bag := pagination.GenBag[bagState]{}
 
-	err := bag.Unmarshal(pToken.Token)
+	err := bag.Unmarshal(opts.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	storageResourceIDs, err := newStorageResourceSplitIdDataFromConnectorId(resource.Id.Resource)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
+	// First invocation: the classic RBAC role-assignment emission at
+	// storage-account scope used to happen here. It emitted a grant on the
+	// storage account's "assignment" entitlement with the role resource as
+	// principal, plus per-action grants through GrantExpandable. Both are
+	// redundant with role_assignment resources carrying ScopeBindingTrait —
+	// see role_assignment.go. Post-sparse-ACL we skip straight to the PMI
+	// (eligible assignment) branch, which is genuinely separate coverage.
 	if bag.Current() == nil {
-		bag.Push(bagState{
-			Value: "",
-			State: "ELIGIBLE",
-		})
-
-		roleClient, err := armauthorization.NewRoleAssignmentsClient(
-			storageResourceIDs.subscriptionID,
-			usr.conn.token,
-			usr.conn.client.ArmOptions(),
-		)
-		if err != nil {
-			return nil, "", nil, err
-		}
-
-		var grants []*v2.Grant
-
-		rolesAssignments := roleClient.NewListForScopePager(storageResourceIDs.AzureId(), nil)
-
-		for rolesAssignments.More() {
-			result, err := rolesAssignments.NextPage(ctx)
-			if err != nil {
-				return nil, "", nil, err
-			}
-
-			convertErr, err := ConvertErr(result.Value, func(in *armauthorization.RoleAssignment) (*v2.Grant, error) {
-				bag.Push(bagState{
-					Value: StringValue(in.Properties.RoleDefinitionID),
-					State: "ASSIGNMENT",
-				})
-
-				return grantFromRoleAssigment(resource, "assignment", storageResourceIDs.subscriptionID, in)
-			})
-
-			if err != nil {
-				return nil, "", nil, err
-			}
-
-			grants = append(grants, convertErr...)
-		}
+		bag.Push(bagState{Value: "", State: "ELIGIBLE"})
 
 		nextToken, err := bag.Marshal()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
-
-		return grants, nextToken, nil, nil
+		return nil, &rs.SyncOpResults{NextPageToken: nextToken}, nil
 	}
 
 	// Get the current state
@@ -192,46 +158,10 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 	var grants []*v2.Grant
 
 	switch state.State {
-	case "ASSIGNMENT":
-		roleDefinitionId := state.Value
-		roleDefinition, err := usr.conn.roleDefinitionsClient.GetByID(ctx, roleDefinitionId, nil)
-
-		if err != nil {
-			return nil, "", nil, err
-		}
-
-		actions, err := rolemapper.StorageAccountPermissions.MapRoleToAzureRoleAction(roleDefinition.Properties.Permissions)
-		if err != nil {
-			return nil, "", nil, err
-		}
-
-		for _, action := range actions {
-			plainRoleId, err := roleIdFromRoleDefinitionId(roleDefinitionId)
-			if err != nil {
-				return nil, "", nil, err
-			}
-
-			roleResourceId, err := rs.NewResourceID(
-				roleResourceType,
-				fmt.Sprintf("%s:%s", plainRoleId, storageResourceIDs.subscriptionID),
-			)
-
-			if err != nil {
-				return nil, "", nil, err
-			}
-
-			newGrant, err := grantFromRole(resource, action, roleResourceId)
-			if err != nil {
-				return nil, "", nil, err
-			}
-
-			grants = append(grants, newGrant)
-		}
-
 	case "ELIGIBLE":
 		if usr.conn.skipEntraIDP2LicenseFeatures {
 			l.Debug("skipping privileged access grants on storage accounts.")
-			return nil, "", nil, nil
+			return nil, nil, nil
 		}
 
 		privilegedId := state.Value
@@ -240,19 +170,19 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 			if err != nil {
 				if status.Code(err) == codes.NotFound {
 					l.Warn("Privileged access not found", zap.String("scope", storageResourceIDs.AzureId()))
-					return nil, "", nil, nil
+					return nil, nil, nil
 				}
 
 				if status.Code(err) == codes.PermissionDenied {
 					l.Error("Permission denied for get privileged access", zap.String("scope", storageResourceIDs.AzureId()))
-					return nil, "", nil, nil
+					return nil, nil, nil
 				}
 
-				return nil, "", nil, err
+				return nil, nil, err
 			}
 
 			if privilegedAccess == nil {
-				return nil, "", nil, fmt.Errorf("privileged access not found for scope %s", storageResourceIDs.AzureId())
+				return nil, nil, fmt.Errorf("privileged access not found for scope %s", storageResourceIDs.AzureId())
 			}
 
 			privilegedId = privilegedAccess.Id
@@ -262,17 +192,17 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 		if err != nil {
 			if status.Code(err) == codes.PermissionDenied {
 				l.Error("Permission denied for get privileged access roles", zap.String("scope", privilegedId))
-				return nil, "", nil, nil
+				return nil, nil, nil
 			}
 
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		grantsResponse, err := ConvertErr(privilegedAssignments, func(in client.PMIRoleAssigment) (*v2.Grant, error) {
 			return grantFromEligibleAssignment(ctx, resource, in)
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		if nextLink != "" {
@@ -286,15 +216,15 @@ func (usr *storageAccountBuilder) Grants(ctx context.Context, resource *v2.Resou
 		grants = append(grants, grantsResponse...)
 
 	default:
-		return nil, "", nil, fmt.Errorf("unknown state: %s", state.State)
+		return nil, nil, fmt.Errorf("unknown state: %s", state.State)
 	}
 
 	nextToken, err := bag.Marshal()
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
-	return grants, nextToken, nil, nil
+	return grants, &rs.SyncOpResults{NextPageToken: nextToken}, nil
 }
 
 func newStorageAccountBuilder(conn *Connector) *storageAccountBuilder {

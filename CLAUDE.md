@@ -12,6 +12,10 @@ Detailed connector documentation is in `.claude/skills/connector/`:
 - `build-pagination.md` - Pagination strategies
 - `ref-unused-features.md` - SDK feature usage notes
 
+Repo-local skills (not baton-admin managed) are in `.claude/skills/local/`:
+- `.claude/skills/local/scope-binding/SKILL.md` - ScopeBinding / role_assignment resource emission, Grant/Revoke idempotency, armauthorization v2 usage
+- `.claude/skills/local/pre-push-gauntlet/SKILL.md` - mandatory pre-push check sequence (gofmt + vet + golangci-lint + test + build) plus live ScopeBinding integration test
+
 **Change-Type Specific Guidance**: See `CHANGE_TYPES.md` for guidance based on what type of change you're making (SDK upgrade, pagination fix, panic fix, provisioning, etc.).
 
 ## What This Is

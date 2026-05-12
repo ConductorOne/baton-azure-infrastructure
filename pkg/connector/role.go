@@ -2,359 +2,220 @@ package connector
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
-	"strings"
+	"sync"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
-	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
-	"github.com/conductorone/baton-sdk/pkg/types/grant"
-	"github.com/google/uuid"
+	"github.com/conductorone/baton-sdk/pkg/session"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 )
 
-type roleAssignmentCacheValue struct {
-	usedRole        map[string]struct{}
-	rolesAssignment []*armauthorization.RoleAssignment
-}
+// roleAssignmentsPrefix is the session-store key prefix for the cached
+// per-subscription role-assignment list.
+const roleAssignmentsPrefix = "azinfra-role-assignments-by-sub:"
+
+// Role builder: baton-azure parity, reference-only.
+//
+// The role resource type is emitted as descriptive metadata ONLY.
+// It carries role-name / description / actions / assignableScopes via the
+// TRAIT_ROLE profile so c1 can resolve `ScopeBindingTrait.role_id` against
+// it. It does NOT emit per-role entitlements or grants, and provisioning
+// (Grant / Revoke) goes through the `role_assignment` builder's sparse-ACL
+// path, not through role.
+//
+// BREAKING: resource IDs and entitlement IDs both change format.
+// Before: resource id = "<uuid>:<subscriptionID>", entitlement id =
+//         "role:<uuid>:<subscriptionID>:owners" / ":assigned".
+// After:  resource id = "<uuid>" (tenant-global), no per-role entitlements.
+//
+// Existing c1 deployments with catalog bindings or active reviews keyed to
+// the old entitlement IDs MUST be re-pointed at the new format (or at the
+// `role_assignment` resource, preferred for sparse-ACL). See PR body for
+// migration guidance.
+
 type roleBuilder struct {
 	conn                  *Connector
 	roleDefinitionsClient *armauthorization.RoleDefinitionsClient
-	// cache for role assignments
-	// subscriptionID -> roleAssignmentCacheValue
-	cache *GenericCache[*roleAssignmentCacheValue]
+
+	// emitted tracks role UUIDs already emitted during this sync. The role
+	// builder is called once per parent scope (subscription or management
+	// group); Azure returns the same built-in roles at every scope, so
+	// without dedup the same role definition would be emitted 5+ times as
+	// separate c1 resources. sync.Map gives us atomic check-and-claim
+	// across concurrent List invocations.
+	emitted sync.Map
 }
 
-func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
+func (r *roleBuilder) ResourceType(_ context.Context) *v2.ResourceType {
 	return roleResourceType
 }
 
-func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+// List enumerates Azure role definitions visible at the parent scope and
+// emits each unique role definition exactly once per sync, parented to the
+// tenant. Deduplication is keyed on the role UUID: built-in roles visible
+// at multiple scopes produce at most one c1 resource per sync.
+//
+// parentResourceID may be a subscription or management group; we extract
+// the ARM scope path either way and let Azure return everything visible at
+// that scope. The SkipUnusedRoles flag (opt-in, BATON_SKIP_UNUSED_ROLES)
+// filters out role definitions with zero role_assignments in the tenant.
+func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	if parentResourceID == nil {
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
-	var rv []*v2.Resource
-	subscriptionID := parentResourceID.Resource
+	l := ctxzap.Extract(ctx)
 
-	scope := fmt.Sprintf("/subscriptions/%s", subscriptionID)
-	// Get the list of role definitions
-	pagerRoles := r.roleDefinitionsClient.NewListPager(scope, nil)
-	for pagerRoles.More() {
-		resp, err := pagerRoles.NextPage(ctx)
+	var scope, subscriptionID string
+	switch parentResourceID.ResourceType {
+	case subscriptionsResourceType.Id:
+		subscriptionID = parentResourceID.Resource
+		scope = fmt.Sprintf("/subscriptions/%s", subscriptionID)
+	case managementGroupResourceType.Id:
+		scope = fmt.Sprintf("/providers/Microsoft.Management/managementGroups/%s", parentResourceID.Resource)
+	default:
+		// Unexpected parent — nothing to list.
+		return nil, nil, nil
+	}
+
+	// Pre-compute used-role set if skip-unused-roles is on. Only applies
+	// when we have a subscriptionID (role_assignments cache is keyed by sub);
+	// for management-group scope we sync all visible roles — the filter
+	// doesn't compose with mgmt-group scope today and silently degrades.
+	var usedRoles map[string]struct{}
+	if r.conn.SkipUnusedRoles && subscriptionID != "" {
+		assignments, err := r.roleAssignments(ctx, opts, subscriptionID)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
+		usedRoles = rolesInUse(assignments)
+	}
 
-		// Iterate over role definitions
+	var out []*v2.Resource
+	pager := r.roleDefinitionsClient.NewListPager(scope, nil)
+	for pager.More() {
+		resp, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
 		for _, role := range resp.Value {
-			if r.conn.SkipUnusedRoles {
+			if role.Name == nil {
+				continue
+			}
+			uuid := *role.Name
+
+			// Skip unused roles if the filter is on and this one isn't assigned anywhere.
+			if usedRoles != nil {
 				if role.ID == nil {
 					continue
 				}
-
-				err := r.cacheRoleAssignments(ctx, subscriptionID)
-				if err != nil {
-					return nil, "", nil, err
-				}
-				// omit ok since we know the key exists
-				assignments, _ := r.cache.Get(subscriptionID)
-				_, ok := assignments.usedRole[*role.ID]
-				if !ok {
-					// not in use, should be skipped
+				if _, ok := usedRoles[*role.ID]; !ok {
 					continue
 				}
 			}
 
-			rs, err := roleResource(ctx, role, &v2.ResourceId{
-				ResourceType: subscriptionsResourceType.Id,
-				Resource:     StringValue(&subscriptionID),
-			})
+			// Claim emission: first caller to reach this UUID wins; others skip.
+			if _, loaded := r.emitted.LoadOrStore(uuid, struct{}{}); loaded {
+				continue
+			}
+
+			// No parent — roles are tenant-global in Azure; mirrors
+			// baton-azure's roleDefinitionBuilder.createResource.
+			rsrc, err := roleResource(ctx, role, nil)
 			if err != nil {
-				return nil, "", nil, err
+				l.Warn("role.List: error building role resource — skipping",
+					zap.String("uuid", uuid), zap.Error(err))
+				continue
 			}
-
-			rv = append(rv, rs)
+			out = append(out, rsrc)
 		}
 	}
 
-	return rv, "", nil, nil
+	return out, nil, nil
 }
 
-func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	var rv []*v2.Entitlement
-	options := []ent.EntitlementOption{
-		ent.WithDisplayName(fmt.Sprintf("%s Role Owner", resource.DisplayName)),
-		ent.WithDescription(fmt.Sprintf("Owner of %s role", resource.DisplayName)),
-		ent.WithGrantableTo(userResourceType),
-	}
-	rv = append(rv, ent.NewPermissionEntitlement(resource, typeOwners, options...))
-
-	options = []ent.EntitlementOption{
-		ent.WithDisplayName(fmt.Sprintf("%s Role Member", resource.DisplayName)),
-		ent.WithDescription(fmt.Sprintf("Member of %s role", resource.DisplayName)),
-		ent.WithGrantableTo(userResourceType, groupResourceType),
-	}
-	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeAssigned, options...))
-
-	options = []ent.EntitlementOption{
-		ent.WithDisplayName(fmt.Sprintf("%s Role Member", resource.DisplayName)),
-		ent.WithDescription(fmt.Sprintf("Member of %s role", resource.DisplayName)),
-		ent.WithGrantableTo(userResourceType, groupResourceType),
-	}
-	rv = append(rv, ent.NewAssignmentEntitlement(resource, typeAssigned, options...))
-
-	return rv, "", nil, nil
+// Entitlements returns nothing. Per-role Owner/Member entitlements are a
+// legacy classic-RBAC projection; the sparse-ACL `role_assignment` resource
+// is the authoritative grant surface in the post-PR world. See baton-azure's
+// roleDefinitionBuilder for the same pattern.
+func (r *roleBuilder) Entitlements(_ context.Context, _ *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
-func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	var (
-		subscriptionID, roleID string
-		rv                     []*v2.Grant
-		gr                     *v2.Grant
-		principalId            *v2.ResourceId
-	)
-	arr := strings.Split(resource.Id.Resource, ":")
-	if len(arr) == 2 {
-		subscriptionID = arr[1]
-		roleID = arr[0]
-	}
-
-	err := r.cacheRoleAssignments(ctx, subscriptionID)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	assignments, _ := r.cache.Get(subscriptionID)
-	for _, assignment := range assignments.rolesAssignment {
-		roleDefinitionID := subscriptionRoleId(subscriptionID, roleID)
-		if roleDefinitionID != *assignment.Properties.RoleDefinitionID {
-			continue
-		}
-
-		principalType, err := getPrincipalType(ctx, r.conn, *assignment.Properties.PrincipalID)
-		if err != nil {
-			continue
-		}
-
-		principalId = getPrincipalIDResource(principalType, assignment)
-		gr = grant.NewGrant(resource, typeAssigned, principalId)
-		rv = append(rv, gr)
-	}
-	return rv, "", nil, nil
-}
-
-func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
-	l := ctxzap.Extract(ctx)
-	if principal.Id.ResourceType != userResourceType.Id {
-		l.Warn(
-			"azure-infrastructure-connector: only users can be granted role membership",
-			zap.String("principal_type", principal.Id.ResourceType),
-			zap.String("principal_id", principal.Id.Resource),
-		)
-
-		return nil, fmt.Errorf("azure-infrastructure-connector: only users can be granted role membership")
-	}
-
-	entitlementResource := entitlement.Resource.Id.Resource
-	if !strings.Contains(entitlementResource, ":") {
-		return nil, fmt.Errorf("invalid role id")
-	}
-
-	entitlementIDs := strings.Split(entitlement.Resource.Id.Resource, ":")
-	if len(entitlementIDs) != 2 {
-		return nil, fmt.Errorf("invalid role id")
-	}
-
-	roleId := entitlementIDs[0]
-	subscriptionId := entitlementIDs[1]
-	principalID := principal.Id.Resource // Object ID of the user, group, or service principal
-
-	// Initialize the client
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, r.conn.client.ArmOptions())
-	if err != nil {
-		return nil, err
-	}
-
-	// Define your scope
-	scope := fmt.Sprintf("/subscriptions/%s", subscriptionId)
-	// Define the details of the role assignment
-	roleDefinitionID := subscriptionRoleId(subscriptionId, roleId)
-	// Create a role assignment name (must be unique)
-	roleAssignmentId := uuid.New().String()
-	// Prepare role assignment parameters
-	parameters := armauthorization.RoleAssignmentCreateParameters{
-		Properties: &armauthorization.RoleAssignmentProperties{
-			PrincipalID:      &principalID,
-			RoleDefinitionID: &roleDefinitionID,
-		},
-	}
-
-	// Create the role assignment
-	resp, err := roleAssignmentsClient.Create(ctx, scope, roleAssignmentId, parameters, nil)
-	if err != nil {
-		var azureErr *azcore.ResponseError
-		switch {
-		case errors.As(err, &azureErr):
-			if azureErr.StatusCode == http.StatusConflict {
-				l.Warn(
-					"azure-infrastructure-connector: failed to perform request",
-					zap.Int("StatusCode", azureErr.StatusCode),
-					zap.String("ErrorCode", azureErr.ErrorCode),
-					zap.String("ErrorMsg", azureErr.Error()),
-				)
-			}
-		default:
-			return nil, err
-		}
-	}
-
-	if resp.ID != nil {
-		l.Warn("Role membership has been created.",
-			zap.String("ID", *resp.ID),
-			zap.String("Type", *resp.Type),
-			zap.String("Name", *resp.Name),
-			zap.String("PrincipalID", *resp.Properties.PrincipalID),
-			zap.String("RoleDefinitionID", *resp.Properties.RoleDefinitionID),
-			zap.String("RoleDefinitionID", *resp.Properties.Scope),
-		)
-	}
-
-	return nil, nil
-}
-
-func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
-	l := ctxzap.Extract(ctx)
-	principal := grant.Principal
-	entitlement := grant.Entitlement
-	if principal.Id.ResourceType != userResourceType.Id {
-		l.Warn(
-			"azure-infrastructure-connector: only users can have role membership revoked",
-			zap.String("principal_type", principal.Id.ResourceType),
-			zap.String("principal_id", principal.Id.Resource),
-		)
-		return nil, fmt.Errorf("azure-infrastructure-connector: only users can have role membership revoked")
-	}
-
-	principalID := principal.Id.Resource
-	entitlementResource := entitlement.Resource.Id.Resource
-	if !strings.Contains(entitlementResource, ":") {
-		return nil, fmt.Errorf("%s", invalidRoleID)
-	}
-
-	entitlementIDs := strings.Split(entitlement.Resource.Id.Resource, ":")
-	if len(entitlementIDs) != 2 {
-		return nil, fmt.Errorf("%s", invalidRoleID)
-	}
-
-	// Prepare role assignment parameters
-	roleID := entitlementIDs[0]
-	subscriptionId := entitlementIDs[1]
-	scope := fmt.Sprintf("/subscriptions/%s", subscriptionId)
-	// role assignment to delete
-	roleAssignmentName, err := getAssignmentID(ctx,
-		r.conn,
-		scope,
-		subscriptionId,
-		roleID,
-		principalID,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a RoleAssignmentsClient
-	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionId, r.conn.token, r.conn.client.ArmOptions())
-	if err != nil {
-		return nil, err
-	}
-
-	// Delete the role assignment
-	roleAssignmentResponse, err := roleAssignmentsClient.Delete(ctx, scope, roleAssignmentName, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if roleAssignmentResponse.ID == nil {
-		return nil, fmt.Errorf("failed to revoke role assignment %s scope: %s", roleID, scope)
-	}
-
-	l.Warn("Role assignment successfully revoked.",
-		zap.String("roleAssignmentID", roleAssignmentName),
-		zap.String("ID", *roleAssignmentResponse.ID),
-	)
-
-	return nil, nil
+// Grants returns nothing. Every (principal, role, scope) triple is carried
+// authoritatively by the `role_assignment` resource with ScopeBindingTrait.
+// See role_assignment.go.
+func (r *roleBuilder) Grants(_ context.Context, _ *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 func newRoleBuilder(c *Connector) *roleBuilder {
 	return &roleBuilder{
 		conn:                  c,
 		roleDefinitionsClient: c.roleDefinitionsClient,
-		cache:                 NewGenericCache[*roleAssignmentCacheValue](),
 	}
 }
 
-func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID string) error {
-	l := ctxzap.Extract(ctx)
-
-	if _, ok := r.cache.Get(subscriptionID); ok {
-		return nil
+// roleAssignments returns the per-subscription role-assignment list, consulting
+// the session-store cache first. Kept here (rather than on the role_assignment
+// builder) because the unused-roles filter on role.List needs it.
+func (r *roleBuilder) roleAssignments(ctx context.Context, opts rs.SyncOpAttrs, subscriptionID string) ([]*armauthorization.RoleAssignment, error) {
+	if opts.Session != nil {
+		if cached, found, err := session.GetJSON[[]*armauthorization.RoleAssignment](ctx, opts.Session, subscriptionID, sessions.WithPrefix(roleAssignmentsPrefix)); err == nil && found {
+			return cached, nil
+		}
 	}
 
-	l.Info(
-		"baton-azure-infrastructure: caching role assignments",
-		zap.String("subscription_id", subscriptionID),
-	)
-
+	l := ctxzap.Extract(ctx)
+	l.Info("baton-azure-infrastructure: caching role assignments",
+		zap.String("subscription_id", subscriptionID))
 	start := time.Now()
 
-	// Create a Role Assignments Client
 	roleAssignmentsClient, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, r.conn.token, r.conn.client.ArmOptions())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// Iterate over all role assignments
-	pagerRoles := roleAssignmentsClient.NewListPager(nil)
-	for pagerRoles.More() {
-		page, err := pagerRoles.NextPage(ctx)
+	var all []*armauthorization.RoleAssignment
+	pager := roleAssignmentsClient.NewListForSubscriptionPager(nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
-
-		assignments, _ := r.cache.GetOrSet(subscriptionID, func() (*roleAssignmentCacheValue, error) {
-			value := &roleAssignmentCacheValue{
-				usedRole:        make(map[string]struct{}),
-				rolesAssignment: make([]*armauthorization.RoleAssignment, 0),
-			}
-			return value, nil
-		})
-
-		for _, assignment := range page.Value {
-			if assignment.Properties == nil && assignment.Properties.RoleDefinitionID != nil {
-				l.Warn("baton-azure-infrastructure: role assignment properties are nil")
+		for _, a := range page.Value {
+			if a.Properties == nil || a.Properties.RoleDefinitionID == nil {
+				l.Warn("baton-azure-infrastructure: role assignment properties or role definition id are nil")
 				continue
 			}
-
-			assignments.usedRole[*assignment.Properties.RoleDefinitionID] = struct{}{}
-			assignments.rolesAssignment = append(assignments.rolesAssignment, assignment)
+			all = append(all, a)
 		}
-
-		r.cache.Set(subscriptionID, assignments)
 	}
 
-	l.Info(
-		"baton-azure-infrastructure: role assignments cached successfully",
+	if opts.Session != nil {
+		_ = session.SetJSON(ctx, opts.Session, subscriptionID, all, sessions.WithPrefix(roleAssignmentsPrefix))
+	}
+
+	l.Info("baton-azure-infrastructure: role assignments cached successfully",
 		zap.String("subscription_id", subscriptionID),
 		zap.Duration("duration", time.Since(start)),
-	)
+		zap.Int("count", len(all)))
+	return all, nil
+}
 
-	return nil
+// rolesInUse returns the set of role-definition IDs referenced by at least
+// one assignment in the list.
+func rolesInUse(assignments []*armauthorization.RoleAssignment) map[string]struct{} {
+	used := make(map[string]struct{}, len(assignments))
+	for _, a := range assignments {
+		if a == nil || a.Properties == nil || a.Properties.RoleDefinitionID == nil {
+			continue
+		}
+		used[*a.Properties.RoleDefinitionID] = struct{}{}
+	}
+	return used
 }

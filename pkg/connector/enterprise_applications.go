@@ -18,6 +18,9 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/session"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 )
@@ -26,41 +29,85 @@ const (
 	ownersStr     = "owners"
 	appRoleStr    = "appRole"
 	assignmentStr = "assignment"
+
+	// servicePrincipalPrefix is the session-store key prefix for the
+	// service-principal metadata cache. Service principal documents are
+	// fetched once and reused across List / Entitlements / Grants to avoid
+	// N re-lookups against Graph for the same application.
+	servicePrincipalPrefix = "azinfra-ent-app-sp:"
 )
 
 type enterpriseApplicationsBuilder struct {
-	client *client.AzureClient
-	cache  *GenericCache[*client.ServicePrincipal]
+	client       *client.AzureClient
+	conn         *Connector
+	skipAdGroups bool
+}
 
-	// organizationIDs is a map of organization IDs that the user is a member of. needs to be set on the builder
-	organizationIDs map[string]struct{}
-	skipAdGroups    bool
+// spFromSession fetches the cached ServicePrincipal via opts.Session; falls
+// back to a live Graph lookup on miss and populates the cache. Returns
+// (nil, nil) only if Graph itself returns empty (shouldn't happen — Graph
+// errors propagate instead).
+func (e *enterpriseApplicationsBuilder) spFromSession(ctx context.Context, opts rs.SyncOpAttrs, principalID string) (*client.ServicePrincipal, error) {
+	if opts.Session != nil {
+		if sp, found, err := session.GetJSON[*client.ServicePrincipal](ctx, opts.Session, principalID, sessions.WithPrefix(servicePrincipalPrefix)); err == nil && found {
+			return sp, nil
+		}
+	}
+	sp, err := e.client.ServicePrincipal(ctx, principalID)
+	if err != nil {
+		return nil, err
+	}
+	if opts.Session != nil {
+		_ = session.SetJSON(ctx, opts.Session, principalID, sp, sessions.WithPrefix(servicePrincipalPrefix))
+	}
+	return sp, nil
 }
 
 func (e *enterpriseApplicationsBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return enterpriseApplicationResourceType
 }
 
-func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
+func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
+	bag, err := parsePageToken(opts.PageToken.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	reqURL := bag.PageToken()
 
 	resp, err := e.client.ListServicePrincipals(ctx, reqURL)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
+	}
+
+	// Lazily fetch the set of organization IDs the SP can see. Memoized via
+	// sync.Once on the Connector — deferred out of New() so `capabilities`
+	// generation works without Azure credentials.
+	orgIDs, err := e.conn.organizationIDs(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var applicationsOwned []*client.ServicePrincipal
 
+	// Bulk-populate the session-store cache with this page's service
+	// principals so subsequent Entitlements / Grants calls skip the
+	// per-principal Graph roundtrip. When opts.Session is nil (test
+	// harness) the later calls fall through to a live Graph lookup.
+	var toCache map[string]*client.ServicePrincipal
+	if opts.Session != nil {
+		toCache = make(map[string]*client.ServicePrincipal)
+	}
 	for _, sp := range resp.Value {
-		if _, ok := e.organizationIDs[sp.AppOwnerOrganizationId]; ok {
-			e.cache.Set(sp.ID, sp)
+		if _, ok := orgIDs[sp.AppOwnerOrganizationId]; ok {
+			if toCache != nil {
+				toCache[sp.ID] = sp
+			}
 			applicationsOwned = append(applicationsOwned, sp)
 		}
+	}
+	if len(toCache) > 0 {
+		_ = session.SetManyJSON(ctx, opts.Session, toCache, sessions.WithPrefix(servicePrincipalPrefix))
 	}
 
 	resources := make([]*v2.Resource, len(applicationsOwned))
@@ -68,7 +115,7 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 	for i, app := range applicationsOwned {
 		value, err := enterpriseApplicationResource(ctx, app, parentResourceID)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		resources[i] = value
@@ -76,13 +123,13 @@ func (e *enterpriseApplicationsBuilder) List(ctx context.Context, parentResource
 
 	pageToken, err := bag.NextToken(resp.NextLink)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
-	return resources, pageToken, nil, nil
+	return resources, &rs.SyncOpResults{NextPageToken: pageToken}, nil
 }
 
-func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	var err error
 
 	// https://learn.microsoft.com/en-us/graph/api/resources/approleassignment?view=graph-rest-1.0
@@ -95,7 +142,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 		ownersEntIdString, err := ownersEntId.MarshalString()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		ent := entitlement.NewPermissionEntitlement(
@@ -125,7 +172,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 		defaultAppRoleAssignmentStringerString, err := defaultAppRoleAssignmentStringer.MarshalString()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		ent := entitlement.NewAssignmentEntitlement(
@@ -140,12 +187,9 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 	}
 
 	principalId := resource.Id.Resource
-	servicePrincipal, err := e.cache.GetOrSet(principalId, func() (*client.ServicePrincipal, error) {
-		return e.client.ServicePrincipal(ctx, principalId)
-	})
-
+	servicePrincipal, err := e.spFromSession(ctx, opts, principalId)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: failed to get service principal on cache: %w", err)
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: failed to get service principal: %w", err)
 	}
 
 	for _, appRole := range servicePrincipal.AppRoles {
@@ -165,7 +209,7 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 
 		appRoleAssignmentIdString, err := appRoleAssignmentId.MarshalString()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		ent := entitlement.NewAssignmentEntitlement(
@@ -180,16 +224,16 @@ func (e *enterpriseApplicationsBuilder) Entitlements(ctx context.Context, resour
 		rv = append(rv, ent)
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
-func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 
 	b := &pagination.Bag{}
-	err := b.Unmarshal(pt.Token)
+	err := b.Unmarshal(opts.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	// AzureId relarted to Azure resource
@@ -218,11 +262,9 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	ps := b.Current()
 	switch ps.ResourceTypeID {
 	case assignmentStr:
-		principalResp, err := e.cache.GetOrSet(principalId, func() (*client.ServicePrincipal, error) {
-			return e.client.ServicePrincipal(ctx, principalId)
-		})
+		principalResp, err := e.spFromSession(ctx, opts, principalId)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		resp := principalResp.AppRolesAssignedTo
@@ -262,16 +304,16 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 			), nil
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		b.Pop()
 		nextToken, err := b.Marshal()
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
-		return grants, nextToken, nil, err
+		return grants, &rs.SyncOpResults{NextPageToken: nextToken}, err
 	case ownersStr:
 		resp, err := e.client.ServicePrincipalOwners(ctx, principalId)
 		if err != nil {
@@ -282,10 +324,10 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 					zap.String("url", ps.Token),
 					zap.Error(err),
 				)
-				return nil, "", nil, nil
+				return nil, nil, nil
 			}
 
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		grants, err := ConvertErr(resp.Members, func(gm *client.Membership) (*v2.Grant, error) {
@@ -323,32 +365,25 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 			), nil
 		})
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		pageToken, err := b.NextToken(resp.NextLink)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
-		return grants, pageToken, nil, nil
+		return grants, &rs.SyncOpResults{NextPageToken: pageToken}, nil
 	default:
-		return nil, "", nil, fmt.Errorf("unknown resource type: %s", ps.ResourceTypeID)
+		return nil, nil, fmt.Errorf("unknown resource type: %s", ps.ResourceTypeID)
 	}
 }
 
 func newEnterpriseApplicationsBuilder(c *Connector) *enterpriseApplicationsBuilder {
-	organizationIDs := map[string]struct{}{}
-
-	for _, d := range c.organizationIDs {
-		organizationIDs[d] = struct{}{}
-	}
-
 	return &enterpriseApplicationsBuilder{
-		client:          c.client,
-		cache:           NewGenericCache[*client.ServicePrincipal](),
-		organizationIDs: organizationIDs,
-		skipAdGroups:    c.SkipAdGroups,
+		client:       c.client,
+		conn:         c,
+		skipAdGroups: c.SkipAdGroups,
 	}
 }
 
