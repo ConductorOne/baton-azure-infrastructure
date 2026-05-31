@@ -596,6 +596,7 @@ func enterpriseApplicationResource(ctx context.Context, app *client.ServicePrinc
 		app.ID,
 		options,
 		rs.WithParentResourceID(parentResourceID),
+		rs.WithNHIType(v2.NonHumanIdentityTrait_NHI_TYPE_APP_REGISTRATION, "azure.enterprise_application"),
 		rs.WithAnnotation(&v2.ExternalLink{
 			Url: app.ExternalURL(),
 		}),
