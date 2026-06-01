@@ -523,6 +523,23 @@ func getPrincipalType(ctx context.Context, cn *Connector, principalID string) (s
 	return "", nil
 }
 
+// managedIdentityNHIDetail returns the axis-2 NHI detail label for a managed
+// identity service principal. Azure encodes the assignment kind in the SP's
+// alternativeNames: "isExplicit=True" marks a user-assigned identity, while
+// "isExplicit=False" marks a system-assigned one. When the discriminator is
+// absent the generic managed-identity label is used.
+func managedIdentityNHIDetail(sp *client.ServicePrincipal) string {
+	for _, name := range sp.AlternativeNames {
+		switch name {
+		case "isExplicit=True":
+			return "azure.user_assigned_mi"
+		case "isExplicit=False":
+			return "azure.system_assigned_mi"
+		}
+	}
+	return "azure.managed_identity"
+}
+
 func managedIdentityResource(ctx context.Context, sp *client.ServicePrincipal, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := make(map[string]interface{})
 	profile["id"] = sp.ID
@@ -549,6 +566,7 @@ func managedIdentityResource(ctx context.Context, sp *client.ServicePrincipal, p
 		sp.ID,
 		options,
 		rs.WithParentResourceID(parentResourceID),
+		rs.WithNHIType(v2.NonHumanIdentityTrait_NHI_TYPE_MANAGED_IDENTITY, managedIdentityNHIDetail(sp)),
 		rs.WithAnnotation(&v2.ExternalLink{
 			Url: sp.ExternalURL(),
 		}),

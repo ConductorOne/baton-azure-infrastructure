@@ -115,6 +115,7 @@ type Assignment struct {
 
 type ServicePrincipal struct {
 	AccountEnabled         bool                 `json:"accountEnabled,omitempty"`
+	AlternativeNames       []string             `json:"alternativeNames,omitempty"`
 	AppDisplayName         string               `json:"appDisplayName,omitempty"`
 	AppId                  string               `json:"appId,omitempty"`
 	AppOwnerOrganizationId string               `json:"appOwnerOrganizationId,omitempty"`

@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/conductorone/baton-azure-infrastructure/pkg/connector/client"
 )
 
 func TestSplitId(t *testing.T) {
@@ -23,4 +25,35 @@ func TestSplitId(t *testing.T) {
 	connectorId, err := newStorageResourceSplitIdDataFromConnectorId(resp.ConnectorId())
 	require.NoError(t, err)
 	require.Equal(t, id, connectorId.AzureId())
+}
+
+func TestManagedIdentityNHIDetail(t *testing.T) {
+	cases := []struct {
+		name     string
+		altNames []string
+		expected string
+	}{
+		{
+			name:     "user assigned",
+			altNames: []string{"isExplicit=True", "/subscriptions/x/resourceGroups/y/providers/Microsoft.ManagedIdentity/userAssignedIdentities/z"},
+			expected: "azure.user_assigned_mi",
+		},
+		{
+			name:     "system assigned",
+			altNames: []string{"isExplicit=False", "/subscriptions/x/resourceGroups/y/providers/Microsoft.Compute/virtualMachines/z"},
+			expected: "azure.system_assigned_mi",
+		},
+		{
+			name:     "no discriminator falls back to generic",
+			altNames: nil,
+			expected: "azure.managed_identity",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sp := &client.ServicePrincipal{AlternativeNames: c.altNames}
+			require.Equal(t, c.expected, managedIdentityNHIDetail(sp))
+		})
+	}
 }

@@ -9,6 +9,7 @@ import (
 
 var servicePrincipalSelect = []string{
 	"accountEnabled",
+	"alternativeNames",
 	"appDisplayName",
 	"appRoles",
 	"appId",
