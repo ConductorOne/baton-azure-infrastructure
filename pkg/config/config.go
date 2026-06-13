@@ -20,6 +20,7 @@ var Config = field.NewConfiguration(
 		field.StringField(
 			"azure-client-secret",
 			field.WithDescription("Azure Client Secret"),
+			field.WithIsSecret(true),
 		),
 		field.StringField(
 			"azure-tenant-id",
