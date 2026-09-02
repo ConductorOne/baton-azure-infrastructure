@@ -7,7 +7,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.8.2
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage v1.7.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.0
-	github.com/conductorone/baton-sdk v0.26.0
+	github.com/conductorone/baton-sdk v0.28.0
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
@@ -35,9 +35,9 @@ require (
 	github.com/cockroachdb/redact v1.1.5 // indirect
 	github.com/cockroachdb/swiss v0.0.0-20251224182025-b0f6560f979b // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
-	github.com/conductorone/dpop v0.2.6 // indirect
-	github.com/conductorone/dpop/integrations/dpop_grpc v0.2.4 // indirect
-	github.com/conductorone/dpop/integrations/dpop_oauth2 v0.2.5 // indirect
+	github.com/conductorone/dpop v0.3.0 // indirect
+	github.com/conductorone/dpop/integrations/dpop_grpc v0.3.0 // indirect
+	github.com/conductorone/dpop/integrations/dpop_oauth2 v0.3.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/getsentry/sentry-go v0.27.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
