@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 )
 
@@ -52,6 +53,39 @@ func (a *AzureClient) ServicePrincipal(ctx context.Context, id string) (*Service
 	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, url, nil, resp)
 	if err != nil {
 		return nil, fmt.Errorf("baton-azure-infrastrucure: failed to get service principal: %w", err)
+	}
+
+	return resp, nil
+}
+
+// servicePrincipalAppRoleAssignedToURL builds the request URL for one page of a
+// service principal's app role assignments. A non-empty nextLink is returned
+// verbatim: Graph's continuation already encodes the skip token, and rebuilding
+// the URL from parameters instead would silently restart at page one.
+func servicePrincipalAppRoleAssignedToURL(qb *AzureQueryBuilder, id string, nextLink string) string {
+	return qb.
+		Version(Beta).
+		Add("$top", "999").
+		BuildUrlWithPagination(path.Join("servicePrincipals", id, "appRoleAssignedTo"), nextLink)
+}
+
+// ServicePrincipalAppRoleAssignedTo returns one page of the app role assignments
+// granted on a service principal, following nextLink for subsequent pages.
+//
+// This deliberately does not read the collection through ServicePrincipal's
+// $expand=appRoleAssignedTo. Graph server-side pages expanded collections and
+// signals the remainder with "appRoleAssignedTo@odata.nextLink", which an expanded
+// read gives the caller no way to follow -- so the assignments silently truncate
+// to whatever Graph chose to inline, varying with load. Reading the collection
+// from its own endpoint keeps the continuation addressable.
+func (a *AzureClient) ServicePrincipalAppRoleAssignedTo(ctx context.Context, id string, nextLink string) (*AppRoleAssignmentList, error) {
+	assignmentsURL := servicePrincipalAppRoleAssignedToURL(a.QueryBuilder(), id, nextLink)
+
+	resp := &AppRoleAssignmentList{}
+
+	err := a.requestWithToken(ctx, graphReadScopes, http.MethodGet, assignmentsURL, nil, resp)
+	if err != nil {
+		return nil, fmt.Errorf("baton-azure-infrastrucure: failed to get service principal app role assignments: %w", err)
 	}
 
 	return resp, nil
