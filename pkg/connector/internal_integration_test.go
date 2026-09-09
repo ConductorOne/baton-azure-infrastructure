@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -14,6 +16,8 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 
 	"github.com/stretchr/testify/require"
 )
@@ -89,25 +93,19 @@ func TestGroupBuilderList(t *testing.T) {
 }
 
 func getConnectorForTesting(ctx context.Context, entraTenantId, entraClientSecret, entraClientId string) (*Connector, error) {
-	cb, err := New(
-		ctx,
-		false,
-		entraTenantId,
-		entraClientId,
-		entraClientSecret,
-		false,
-		false,
-		"graph.microsoft.com",
-		false,
-		false,
-		false,
-	)
-
+	// Test harness bypasses the config.RunConnector entrypoint and calls
+	// NewConnectorFromToken directly to avoid the full CLI-flag parsing path.
+	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
 	if err != nil {
 		return nil, err
 	}
-
-	return cb, nil
+	cred, err := azidentity.NewClientSecretCredential(entraTenantId, entraClientId, entraClientSecret, &azidentity.ClientSecretCredentialOptions{
+		ClientOptions: azcore.ClientOptions{Transport: httpClient},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return NewConnectorFromToken(ctx, httpClient, cred, false, false, "graph.microsoft.com", false, false, false)
 }
 
 func TestSubscriptionBuilderList(t *testing.T) {
