@@ -11,7 +11,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
@@ -70,7 +69,7 @@ func TestUserBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	u := newUserBuilder(connTest)
-	res, _, _, err := u.List(ctxTest, nil, &pagination.Token{})
+	res, _, err := u.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 	require.NotNil(t, res)
 }
@@ -84,7 +83,7 @@ func TestGroupBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	u := newGroupBuilder(connTest)
-	res, _, _, err := u.List(ctxTest, nil, &pagination.Token{})
+	res, _, err := u.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 	require.NotNil(t, res)
 }
@@ -120,7 +119,7 @@ func TestSubscriptionBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	s := newSubscriptionBuilder(connTest)
-	_, _, _, err = s.List(ctxTest, nil, &pagination.Token{})
+	_, _, err = s.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 
@@ -133,7 +132,7 @@ func TestTenantBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	tn := newTenantBuilder(connTest)
-	_, _, _, err = tn.List(ctxTest, nil, &pagination.Token{})
+	_, _, err = tn.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 
@@ -146,7 +145,7 @@ func TestResourceGroupBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	rg := newResourceGroupBuilder(connTest)
-	_, _, _, err = rg.List(ctxTest, nil, &pagination.Token{})
+	_, _, err = rg.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 
@@ -159,7 +158,7 @@ func TestRoleAssignmentResourceGroupBuilderList(t *testing.T) {
 	require.NoError(t, err)
 
 	ra := newRoleAssignmentResourceGroupBuilder(connTest)
-	_, _, _, err = ra.List(ctxTest, nil, &pagination.Token{})
+	_, _, err = ra.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 func TestRoleBuilderList(t *testing.T) {
@@ -173,7 +172,7 @@ func TestRoleBuilderList(t *testing.T) {
 	connTest.SkipUnusedRoles = true
 
 	r := newRoleBuilder(connTest)
-	_, _, _, err = r.List(ctxTest, nil, &pagination.Token{})
+	_, _, err = r.List(ctxTest, nil, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 
@@ -202,7 +201,7 @@ func TestRoleGrants(t *testing.T) {
 		}, nil)
 		require.NoError(t, err)
 
-		_, _, _, err = r.Grants(ctxTest, resource, nil)
+		_, _, err = r.Grants(ctxTest, resource, rs.SyncOpAttrs{})
 		require.NoError(t, err)
 	}
 }
@@ -229,7 +228,7 @@ func TestRoleAssignmentResourceGroupGrants(t *testing.T) {
 			}, nil)
 		require.NoError(t, err)
 
-		_, _, _, err = r.Grants(ctxTest, gr, nil)
+		_, _, err = r.Grants(ctxTest, gr, rs.SyncOpAttrs{})
 		require.NoError(t, err)
 	}
 }
@@ -250,7 +249,7 @@ func TestSubscriptionGrants(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	_, _, _, err = s.Grants(ctxTest, res, &pagination.Token{})
+	_, _, err = s.Grants(ctxTest, res, rs.SyncOpAttrs{})
 	require.NoError(t, err)
 }
 
@@ -485,7 +484,7 @@ func TestResourceGroupEntitlements(t *testing.T) {
 			}, nil)
 		require.NoError(t, err)
 
-		_, _, _, err = rg.Entitlements(ctxTest, assignmentResourceGroupResource, nil)
+		_, _, err = rg.Entitlements(ctxTest, assignmentResourceGroupResource, rs.SyncOpAttrs{})
 		require.NoError(t, err)
 	}
 }

@@ -170,12 +170,12 @@ type raBagState struct {
 //	returns empty + no error — List continues with stage-1 coverage
 //	only. Per-sub 403s are logged and skipped (common in mixed-
 //	permission enterprise tenants).
-func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 
-	bag, err := pagination.GenBagFromToken[raBagState](pToken)
+	bag, err := pagination.GenBagFromToken[raBagState](&opts.PageToken)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role_assignment pagination: %w", err)
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: role_assignment pagination: %w", err)
 	}
 
 	// First-call seed: kick off with the init phase.
@@ -191,14 +191,14 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, pTok
 	case raPhaseSub:
 		return b.listSubPage(ctx, l, bag, state)
 	default:
-		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role_assignment pagination: unknown phase %q", state.Phase)
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: role_assignment pagination: unknown phase %q", state.Phase)
 	}
 }
 
 // listInit handles the first pagination call: enumerate subscriptions,
 // emit every mgmt-group-scope assignment in a single page, and seed the
 // bag with the pending-sub list + the mgmt-group-scope seen-set.
-func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag *pagination.GenBag[raBagState]) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag *pagination.GenBag[raBagState]) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	// Management Group Reader is a hard prerequisite: without the tenant
 	// hierarchy the scope-parent wiring produces disconnected roots and the
 	// sparse-ACL tree UX renders poorly. The sync.Once memoization means
@@ -208,7 +208,7 @@ func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag
 	// phase error path doesn't need a live Connector — keeps pagination-
 	// parsing unit tests working with a bare builder. See hierarchy.go.
 	if err := b.conn.ensureHierarchy(ctx); err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	// Enumerate subscriptions (IDs only; we walk each one in its own page
@@ -217,11 +217,11 @@ func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag
 	var pendingSubs []string
 	for subsPager.More() {
 		if err := ctx.Err(); err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 		subsPage, err := subsPager.NextPage(ctx)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing subscriptions: %w", err)
+			return nil, nil, fmt.Errorf("baton-azure-infrastructure: listing subscriptions: %w", err)
 		}
 		for _, sub := range subsPage.Value {
 			if sub == nil || sub.SubscriptionID == nil || *sub.SubscriptionID == "" {
@@ -242,16 +242,16 @@ func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag
 	if firstSubID != "" {
 		mgs, err := b.conn.managementGroups(ctx)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing management groups: %w", err)
+			return nil, nil, fmt.Errorf("baton-azure-infrastructure: listing management groups: %w", err)
 		}
 		if len(mgs) > 0 {
 			raClient, err := armauthorization.NewRoleAssignmentsClient(firstSubID, b.conn.token, b.conn.client.ArmOptions())
 			if err != nil {
-				return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role assignments client for mgmt-group walk: %w", err)
+				return nil, nil, fmt.Errorf("baton-azure-infrastructure: role assignments client for mgmt-group walk: %w", err)
 			}
 			for _, mg := range mgs {
 				if err := ctx.Err(); err != nil {
-					return nil, "", nil, err
+					return nil, nil, err
 				}
 				if mg == nil || mg.ID == nil {
 					continue
@@ -260,7 +260,7 @@ func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag
 				pager := raClient.NewListForScopePager(mgScope, nil)
 				for pager.More() {
 					if err := ctx.Err(); err != nil {
-						return nil, "", nil, err
+						return nil, nil, err
 					}
 					page, pagerErr := pager.NextPage(ctx)
 					if pagerErr != nil {
@@ -272,7 +272,7 @@ func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag
 								zap.String("mgScope", mgScope), zap.Error(pagerErr))
 							break
 						}
-						return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments at mgmt-group %s: %w", mgScope, pagerErr)
+						return nil, nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments at mgmt-group %s: %w", mgScope, pagerErr)
 					}
 					for _, ra := range page.Value {
 						if ra == nil || ra.Properties == nil || ra.Name == nil {
@@ -280,7 +280,7 @@ func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag
 						}
 						resource, resErr := roleAssignmentResource(firstSubID, ra)
 						if resErr != nil {
-							return nil, "", nil, resErr
+							return nil, nil, resErr
 						}
 						if resource == nil {
 							continue
@@ -312,7 +312,7 @@ func (b *roleAssignmentBuilder) listInit(ctx context.Context, l *zap.Logger, bag
 // process one whole sub per baton call rather than one Azure page),
 // dedup against the mgmt-group-scope seen-set, then advance to the next
 // pending sub.
-func (b *roleAssignmentBuilder) listSubPage(ctx context.Context, l *zap.Logger, bag *pagination.GenBag[raBagState], state *raBagState) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (b *roleAssignmentBuilder) listSubPage(ctx context.Context, l *zap.Logger, bag *pagination.GenBag[raBagState], state *raBagState) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	subID := state.CurrentSub
 	seen := make(map[string]struct{}, len(state.SeenAssignmentNames))
 	for _, n := range state.SeenAssignmentNames {
@@ -323,13 +323,13 @@ func (b *roleAssignmentBuilder) listSubPage(ctx context.Context, l *zap.Logger, 
 	if subID != "" {
 		raClient, err := armauthorization.NewRoleAssignmentsClient(subID, b.conn.token, b.conn.client.ArmOptions())
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role assignments client: %w", err)
+			return nil, nil, fmt.Errorf("baton-azure-infrastructure: role assignments client: %w", err)
 		}
 		pager := raClient.NewListForSubscriptionPager(nil)
 	subPager:
 		for pager.More() {
 			if err := ctx.Err(); err != nil {
-				return nil, "", nil, err
+				return nil, nil, err
 			}
 			page, pagerErr := pager.NextPage(ctx)
 			if pagerErr != nil {
@@ -340,7 +340,7 @@ func (b *roleAssignmentBuilder) listSubPage(ctx context.Context, l *zap.Logger, 
 						zap.String("subID", subID), zap.Error(pagerErr))
 					break subPager
 				}
-				return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments for sub %s: %w", subID, pagerErr)
+				return nil, nil, fmt.Errorf("baton-azure-infrastructure: listing role assignments for sub %s: %w", subID, pagerErr)
 			}
 			for _, ra := range page.Value {
 				if !shouldEmitRoleAssignment(ra, seen) {
@@ -348,7 +348,7 @@ func (b *roleAssignmentBuilder) listSubPage(ctx context.Context, l *zap.Logger, 
 				}
 				resource, resErr := roleAssignmentResource(subID, ra)
 				if resErr != nil {
-					return nil, "", nil, resErr
+					return nil, nil, resErr
 				}
 				if resource == nil {
 					// Unlike the seen-set short-circuit, roleAssignmentResource
@@ -415,10 +415,10 @@ func advancePendingSubs(justProcessed string, pending []string) (string, []strin
 
 // finishPage serializes the bag and returns the (resources, nextToken,
 // annotations, error) tuple in the shape List expects.
-func finishPage(bag *pagination.GenBag[raBagState], emitted []*v2.Resource) ([]*v2.Resource, string, annotations.Annotations, error) {
+func finishPage(bag *pagination.GenBag[raBagState], emitted []*v2.Resource) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	nextToken, err := bag.Marshal()
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("baton-azure-infrastructure: role_assignment pagination marshal: %w", err)
+		return nil, nil, fmt.Errorf("baton-azure-infrastructure: role_assignment pagination marshal: %w", err)
 	}
 	// When the bag is fully drained Marshal returns a non-empty
 	// empty-states envelope; the SDK's end-of-pagination signal is an
@@ -426,10 +426,10 @@ func finishPage(bag *pagination.GenBag[raBagState], emitted []*v2.Resource) ([]*
 	if bag.Current() == nil {
 		nextToken = ""
 	}
-	return emitted, nextToken, nil, nil
+	return emitted, &rs.SyncOpResults{NextPageToken: nextToken}, nil
 }
 
-func (b *roleAssignmentBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (b *roleAssignmentBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	return []*v2.Entitlement{
 		ent.NewAssignmentEntitlement(
 			resource,
@@ -443,7 +443,7 @@ func (b *roleAssignmentBuilder) Entitlements(_ context.Context, resource *v2.Res
 			// confusing error.
 			ent.WithGrantableTo(userResourceType, managedIdentitylResourceType, enterpriseApplicationResourceType),
 		),
-	}, "", nil, nil
+	}, nil, nil
 }
 
 // batonToAzurePrincipalType maps a baton principal resource-type id to the
@@ -469,10 +469,10 @@ func batonToAzurePrincipalType(batonResourceType string) *armauthorization.Princ
 // We resolve principal type via the per-builder cache (backed by
 // getPrincipalType, which hits Graph directoryObjects) so that repeat
 // principals across many bindings don't each incur a Graph roundtrip.
-func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
 	principalID, parsedOK := parsePrincipalFromRoleAssignmentResourceID(resource.Id.Resource)
 	if !parsedOK || principalID == "" {
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 	principalType := b.principalTypeForID(ctx, principalID)
 	if principalType == "" {
@@ -480,7 +480,7 @@ func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resourc
 		// principalTypeForID). Emit no grant rather than failing the whole
 		// sync — matches the degrade-gracefully pattern used elsewhere in
 		// this connector.
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 	principalResourceType := mapGraphPrincipalTypeToBaton(principalType)
 	if principalResourceType == "" {
@@ -494,14 +494,14 @@ func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resourc
 			zap.String("principal_id", principalID),
 			zap.String("role_assignment_resource_id", resource.Id.Resource),
 		)
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 	principalResourceID := &v2.ResourceId{
 		ResourceType: principalResourceType,
 		Resource:     principalID,
 	}
 	gr := grant.NewGrant(resource, typeAssigned, principalResourceID)
-	return []*v2.Grant{gr}, "", nil, nil
+	return []*v2.Grant{gr}, nil, nil
 }
 
 // Grant attaches a principal to an existing role_assignment binding by creating
