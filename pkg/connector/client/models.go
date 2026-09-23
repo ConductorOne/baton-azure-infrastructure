@@ -114,19 +114,23 @@ type Assignment struct {
 }
 
 type ServicePrincipal struct {
-	AccountEnabled         bool                 `json:"accountEnabled,omitempty"`
-	AppDisplayName         string               `json:"appDisplayName,omitempty"`
-	AppId                  string               `json:"appId,omitempty"`
-	AppOwnerOrganizationId string               `json:"appOwnerOrganizationId,omitempty"`
-	Description            string               `json:"description,omitempty"`
-	DisplayName            string               `json:"displayName,omitempty"`
-	Homepage               string               `json:"homepage,omitempty"`
-	ID                     string               `json:"id,omitempty"`
-	Info                   Info                 `json:"info"`
-	ServicePrincipalType   string               `json:"servicePrincipalType,omitempty"`
-	Tags                   []string             `json:"tags,omitempty"`
-	AppRoles               []*AppRole           `json:"appRoles,omitempty"`
-	AppRolesAssignedTo     []*AppRoleAssignment `json:"appRoleAssignedTo,omitempty"`
+	AccountEnabled         bool       `json:"accountEnabled,omitempty"`
+	AppDisplayName         string     `json:"appDisplayName,omitempty"`
+	AppId                  string     `json:"appId,omitempty"`
+	AppOwnerOrganizationId string     `json:"appOwnerOrganizationId,omitempty"`
+	Description            string     `json:"description,omitempty"`
+	DisplayName            string     `json:"displayName,omitempty"`
+	Homepage               string     `json:"homepage,omitempty"`
+	ID                     string     `json:"id,omitempty"`
+	Info                   Info       `json:"info"`
+	ServicePrincipalType   string     `json:"servicePrincipalType,omitempty"`
+	Tags                   []string   `json:"tags,omitempty"`
+	AppRoles               []*AppRole `json:"appRoles,omitempty"`
+	// Populated only by the $expand form, which Graph server-side pages without
+	// giving this struct anywhere to carry the continuation -- so it may be a
+	// truncated prefix. Never treat it as the complete set; use
+	// ServicePrincipalAppRoleAssignedTo instead.
+	AppRolesAssignedTo []*AppRoleAssignment `json:"appRoleAssignedTo,omitempty"`
 }
 
 type Info struct {
@@ -154,6 +158,15 @@ type Organizations struct {
 
 type Organization struct {
 	ID string `json:"id"`
+}
+
+// AppRoleAssignmentList is a page of app role assignments granted on a service
+// principal. NextLink is what makes this type necessary: the $expand form of the
+// same collection has nowhere to carry the continuation, so it truncates silently.
+type AppRoleAssignmentList struct {
+	Context     string               `json:"@odata.context"`
+	NextLink    string               `json:"@odata.nextLink"`
+	Assignments []*AppRoleAssignment `json:"value"`
 }
 
 type AppRoleAssignment struct {

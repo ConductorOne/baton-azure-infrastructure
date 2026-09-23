@@ -218,15 +218,12 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 	ps := b.Current()
 	switch ps.ResourceTypeID {
 	case assignmentStr:
-		principalResp, err := e.cache.GetOrSet(principalId, func() (*client.ServicePrincipal, error) {
-			return e.client.ServicePrincipal(ctx, principalId)
-		})
+		resp, err := e.client.ServicePrincipalAppRoleAssignedTo(ctx, principalId, ps.Token)
 		if err != nil {
 			return nil, "", nil, err
 		}
 
-		resp := principalResp.AppRolesAssignedTo
-		grants, err := ConvertErr(resp, func(appRoleAssignment *client.AppRoleAssignment) (*v2.Grant, error) {
+		grants, err := ConvertErr(resp.Assignments, func(appRoleAssignment *client.AppRoleAssignment) (*v2.Grant, error) {
 			var options []grant.GrantOption
 
 			rid := &v2.ResourceId{Resource: appRoleAssignment.PrincipalId}
@@ -265,13 +262,12 @@ func (e *enterpriseApplicationsBuilder) Grants(ctx context.Context, resource *v2
 			return nil, "", nil, err
 		}
 
-		b.Pop()
-		nextToken, err := b.Marshal()
+		pageToken, err := b.NextToken(resp.NextLink)
 		if err != nil {
 			return nil, "", nil, err
 		}
 
-		return grants, nextToken, nil, err
+		return grants, pageToken, nil, nil
 	case ownersStr:
 		resp, err := e.client.ServicePrincipalOwners(ctx, principalId)
 		if err != nil {
@@ -449,16 +445,27 @@ func (o *enterpriseApplicationsBuilder) Revoke(ctx context.Context, grant *v2.Gr
 			return nil, err
 		}
 	case assignmentStr:
-		servicePrincipal, err := o.client.ServicePrincipal(ctx, resourceID)
-		if err != nil {
-			return nil, err
-		}
-
+		// Page the whole collection. Reading it off ServicePrincipal's expanded copy
+		// truncated it, so any assignment past the truncation point was invisible here
+		// and the revoke failed with "app role assignment not found".
 		var roleAssignment *client.AppRoleAssignment
-		for _, assignment := range servicePrincipal.AppRolesAssignedTo {
-			if assignment.AppRoleId == eaEntId.AppRoleId {
-				roleAssignment = assignment
+		nextLink := ""
+		for {
+			resp, err := o.client.ServicePrincipalAppRoleAssignedTo(ctx, resourceID, nextLink)
+			if err != nil {
+				return nil, err
 			}
+
+			for _, assignment := range resp.Assignments {
+				if assignment.AppRoleId == eaEntId.AppRoleId {
+					roleAssignment = assignment
+				}
+			}
+
+			if resp.NextLink == "" {
+				break
+			}
+			nextLink = resp.NextLink
 		}
 
 		if roleAssignment == nil {
