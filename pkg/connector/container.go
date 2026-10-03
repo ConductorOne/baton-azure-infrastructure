@@ -82,7 +82,7 @@ func (usr *containerBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 			}
 
 			appTraits := []rs.AppTraitOption{
-				rs.WithAppProfile(profile),
+				rs.WithAppProfile(profile), //nolint:staticcheck // Preserve legacy trait output.
 			}
 
 			return rs.NewResource(
