@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -322,7 +322,7 @@ func (r *roleBuilder) cacheRoleAssignments(ctx context.Context, subscriptionID s
 	}
 
 	// Iterate over all role assignments
-	pagerRoles := roleAssignmentsClient.NewListPager(nil)
+	pagerRoles := roleAssignmentsClient.NewListForSubscriptionPager(nil)
 	for pagerRoles.More() {
 		page, err := pagerRoles.NextPage(ctx)
 		if err != nil {
