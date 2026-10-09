@@ -25,7 +25,6 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
-	expSlices "golang.org/x/exp/slices"
 )
 
 // https://learn.microsoft.com/en-us/graph/api/resources/approleassignment?view=graph-rest-1.0
@@ -72,7 +71,7 @@ func userResource(ctx context.Context, u *client.User, parentResourceID *v2.Reso
 
 	options := []rs.UserTraitOption{
 		rs.WithEmail(primaryEmail, true),
-		rs.WithUserProfile(profile),
+		rs.WithUserProfile(profile), //nolint:staticcheck // Preserve legacy trait output.
 	}
 
 	options = append(options, userTraitOptions...)
@@ -81,9 +80,9 @@ func userResource(ctx context.Context, u *client.User, parentResourceID *v2.Reso
 	}
 
 	if u.AccountEnabled {
-		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED))
+		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED)) //nolint:staticcheck // Preserve legacy trait output.
 	} else {
-		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
+		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED)) //nolint:staticcheck // Preserve legacy trait output.
 	}
 
 	ret, err := rs.NewUserResource(
@@ -170,7 +169,7 @@ func groupResource(ctx context.Context, g *client.Group, parentResourceID *v2.Re
 		profile["on_premises_sync_enabled"] = g.OnPremisesSyncEnabled
 	}
 
-	groupTraitOptions := []rs.GroupTraitOption{rs.WithGroupProfile(profile)}
+	groupTraitOptions := []rs.GroupTraitOption{rs.WithGroupProfile(profile)} //nolint:staticcheck // Preserve legacy trait output.
 	rv, err := rs.NewGroupResource(
 		g.DisplayName,
 		groupResourceType,
@@ -301,7 +300,7 @@ func subscriptionResource(ctx context.Context, s *armsubscription.Subscription) 
 		"state":          StringValue((*string)(s.State)),
 	}
 
-	appTraitOpts = append(appTraitOpts, rs.WithAppProfile(profile))
+	appTraitOpts = append(appTraitOpts, rs.WithAppProfile(profile)) //nolint:staticcheck // Preserve legacy trait output.
 	return rs.NewAppResource(
 		StringValue(s.DisplayName),
 		subscriptionsResourceType,
@@ -326,7 +325,7 @@ func tenantResource(ctx context.Context, t *armsubscription.TenantIDDescription)
 	}
 
 	tenantTraitOptions := []rs.AppTraitOption{
-		rs.WithAppProfile(profile),
+		rs.WithAppProfile(profile), //nolint:staticcheck // Preserve legacy trait output.
 	}
 
 	opts = append(opts, rs.WithAppTrait(tenantTraitOptions...))
@@ -358,7 +357,7 @@ func resourceGroupResource(ctx context.Context, rg *armresources.ResourceGroup, 
 	}
 
 	groupListTraitOptions := []rs.GroupTraitOption{
-		rs.WithGroupProfile(profile),
+		rs.WithGroupProfile(profile), //nolint:staticcheck // Preserve legacy trait output.
 	}
 
 	opts = append(opts, rs.WithGroupTrait(groupListTraitOptions...), rs.WithParentResourceID(parentResourceID))
@@ -385,7 +384,7 @@ func roleAssignmentResourceGroupResource(ctx context.Context, subscriptionID, ro
 	}
 
 	groupListTraitOptions := []rs.GroupTraitOption{
-		rs.WithGroupProfile(profile),
+		rs.WithGroupProfile(profile), //nolint:staticcheck // Preserve legacy trait output.
 	}
 
 	opts = append(opts, rs.WithGroupTrait(groupListTraitOptions...), rs.WithParentResourceID(parentResourceID))
@@ -462,7 +461,7 @@ func roleResource(ctx context.Context, role *armauthorization.RoleDefinition, pa
 	}
 
 	roleTraitOptions := []rs.RoleTraitOption{
-		rs.WithRoleProfile(profile),
+		rs.WithRoleProfile(profile), //nolint:staticcheck // Preserve legacy trait output.
 	}
 
 	opts = append(opts, rs.WithRoleTrait(roleTraitOptions...), rs.WithParentResourceID(parentResourceID))
@@ -528,20 +527,20 @@ func managedIdentityResource(ctx context.Context, sp *client.ServicePrincipal, p
 	profile["id"] = sp.ID
 	profile["app_id"] = sp.AppId
 	options := []rs.UserTraitOption{
-		rs.WithUserProfile(profile),
+		rs.WithUserProfile(profile), //nolint:staticcheck // Preserve legacy trait output.
 		rs.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_SERVICE),
 	}
 
 	if !IsEmpty(sp.Info.LogoUrl) {
-		options = append(options, rs.WithUserIcon(&v2.AssetRef{
+		options = append(options, rs.WithUserIcon(&v2.AssetRef{ //nolint:staticcheck // Preserve legacy trait output.
 			Id: sp.Info.LogoUrl,
 		}))
 	}
 
 	if sp.AccountEnabled {
-		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED))
+		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED)) //nolint:staticcheck // Preserve legacy trait output.
 	} else {
-		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED))
+		options = append(options, rs.WithStatus(v2.UserTrait_Status_STATUS_DISABLED)) //nolint:staticcheck // Preserve legacy trait output.
 	}
 	ret, err := rs.NewUserResource(
 		sp.GetDisplayName(),
@@ -564,16 +563,16 @@ func enterpriseApplicationResource(ctx context.Context, app *client.ServicePrinc
 	profile := make(map[string]interface{})
 	profile["id"] = app.ID
 	profile["app_id"] = app.AppId
-	if expSlices.Contains(app.Tags, "WindowsAzureActiveDirectoryIntegratedApp") {
+	if slices.Contains(app.Tags, "WindowsAzureActiveDirectoryIntegratedApp") {
 		profile["is_integrated"] = true
 	}
 
-	if expSlices.Contains(app.Tags, "HideApp") {
+	if slices.Contains(app.Tags, "HideApp") {
 		profile["hidden_app"] = true
 	}
 
 	options := []rs.AppTraitOption{
-		rs.WithAppProfile(profile),
+		rs.WithAppProfile(profile), //nolint:staticcheck // Preserve legacy trait output.
 	}
 	if !IsEmpty(app.Info.LogoUrl) {
 		options = append(options, rs.WithAppLogo(&v2.AssetRef{
@@ -845,7 +844,7 @@ func storageAccountResource(ctx context.Context, account *armstorage.Account, pa
 	}
 
 	appTraits := []rs.AppTraitOption{
-		rs.WithAppProfile(profile),
+		rs.WithAppProfile(profile), //nolint:staticcheck // Preserve legacy trait output.
 	}
 
 	opts := []rs.ResourceOption{
