@@ -10,7 +10,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage v1.7.0
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription v1.2.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.0
-	github.com/conductorone/baton-sdk v0.46.0
+	github.com/conductorone/baton-sdk v0.46.1
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -60,9 +60,9 @@ require (
 	github.com/cockroachdb/redact v1.1.8 // indirect
 	github.com/cockroachdb/swiss v0.0.0-20260820225851-333444432258 // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20250429170803-42689b6311bb // indirect
-	github.com/conductorone/dpop v0.4.0 // indirect
-	github.com/conductorone/dpop/integrations/dpop_grpc v0.4.0 // indirect
-	github.com/conductorone/dpop/integrations/dpop_oauth2 v0.4.0 // indirect
+	github.com/conductorone/dpop v0.4.1 // indirect
+	github.com/conductorone/dpop/integrations/dpop_grpc v0.4.1 // indirect
+	github.com/conductorone/dpop/integrations/dpop_oauth2 v0.4.1 // indirect
 	github.com/deckarep/golang-set/v2 v2.9.0 // indirect
 	github.com/ebitengine/purego v0.11.3 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
